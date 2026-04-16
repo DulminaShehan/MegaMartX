@@ -1,0 +1,54 @@
+/* ============================================================
+   Global Styles — MegaMartX (White + Light Blue Theme)
+   ============================================================ */
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html { scroll-behavior: smooth; }
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background-color: #ffffff;
+  color: #000000;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+button { font-family: inherit; }
+a { color: inherit; text-decoration: none; }
+
+/* ── Spinner ── */
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: #f0f8ff; }
+::-webkit-scrollbar-thumb { background: #90caf9; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #2196F3; }
+
+/* ── Input focus ── */
+input:focus, textarea:focus, select:focus {
+  border-color: #2196F3 !important;
+  box-shadow: 0 0 0 3px rgba(33,150,243,0.12) !important;
+  outline: none;
+}
+
+/* ── Responsive helpers ── */
+@media (max-width: 768px) {
+  .hide-mobile { display: none !important; }
+}
+@media (min-width: 769px) {
+  .show-mobile { display: none !important; }
+}
