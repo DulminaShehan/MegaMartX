@@ -1,379 +1,684 @@
 // ============================================================
-// Seller Dashboard — Products tab + Orders tab
+// Seller Dashboard — Sidebar layout
+// Sections: Dashboard (stats) | Add Product | My Products | Orders
+// Image upload via multer  ·  API calls via axios
 // ============================================================
 
 import { useState, useEffect, useRef } from 'react'
+import axios from 'axios'
 import {
-  FiPlus, FiEdit2, FiTrash2, FiX, FiUpload,
-  FiPackage, FiDollarSign, FiGrid, FiPercent,
-  FiImage, FiTag, FiInfo, FiLayers, FiCheckCircle,
-  FiAlertCircle, FiBox, FiShoppingBag, FiChevronDown, FiChevronUp,
-  FiClock, FiTruck, FiCheck,
+  FiGrid, FiPlus, FiPackage, FiShoppingBag,
+  FiEdit2, FiTrash2, FiUpload, FiX, FiCheck,
+  FiDollarSign, FiPercent, FiTag, FiInfo, FiLayers,
+  FiTruck, FiClock, FiAlertCircle, FiBox,
+  FiChevronDown, FiChevronUp, FiLogOut, FiImage,
 } from 'react-icons/fi'
 import {
   addProduct, updateProduct, deleteProduct,
   getSellerProducts, getSellerOrders, updateOrderStatus,
 } from '../firebase/firestore'
-import { uploadProductImage, deleteProductImage } from '../firebase/storage'
 import { useAuth } from '../context/AuthContext'
 import { formatPrice, formatDate, CATEGORIES, STATUS_COLORS, imgFallback } from '../utils/helpers'
 import { FullPageLoader } from '../components/Loader'
 import toast from 'react-hot-toast'
 
-const EMPTY_FORM = {
-  title: '', description: '', category: 'Electronics',
-  brand: '', stock: '', price: '', originalPrice: '',
-  imageUrl: '', imagePath: '',
-}
+const API    = import.meta.env.VITE_API_URL || 'http://localhost:5000'
+const CATS   = CATEGORIES.filter(c => c !== 'All')
 
-const TABS = ['My Products', 'Orders']
+// ── Blank form state ──────────────────────────────────────────
+const BLANK = { name: '', description: '', category: 'Electronics', price: '', discount: '', stock: '' }
+
+// ── Nav items ─────────────────────────────────────────────────
+const NAV = [
+  { id: 'dashboard', label: 'Dashboard',   icon: FiGrid },
+  { id: 'add',       label: 'Add Product', icon: FiPlus },
+  { id: 'products',  label: 'My Products', icon: FiPackage },
+  { id: 'orders',    label: 'Orders',      icon: FiShoppingBag },
+]
 
 // ─────────────────────────────────────────────────────────────
 const SellerDashboard = () => {
-  const { currentUser, userProfile } = useAuth()
-  const [tab, setTab]           = useState('My Products')
-  const [products, setProducts] = useState([])
-  const [orders, setOrders]     = useState([])
-  const [loading, setLoading]   = useState(true)
-  const [modal, setModal]       = useState(false)
-  const [form, setForm]         = useState(EMPTY_FORM)
-  const [editId, setEditId]     = useState(null)
-  const [saving, setSaving]     = useState(false)
-  const [imgFile, setImgFile]   = useState(null)
-  const [preview, setPreview]   = useState('')
-  const [dragOver, setDragOver] = useState(false)
-  const [hoverImg, setHoverImg] = useState(false)
-  const [expanded, setExpanded] = useState(null)
+  const { currentUser, userProfile, logout } = useAuth()
+
+  const [view, setView]           = useState('dashboard')
+  const [products, setProducts]   = useState([])
+  const [orders, setOrders]       = useState([])
+  const [loading, setLoading]     = useState(true)
+  const [saving,  setSaving]      = useState(false)
+  const [editItem, setEditItem]   = useState(null)     // product being edited
+  const [form, setForm]           = useState(BLANK)
+  const [imgFile, setImgFile]     = useState(null)
+  const [preview, setPreview]     = useState('')
+  const [dragOver, setDragOver]   = useState(false)
+  const [expanded, setExpanded]   = useState(null)     // expanded order id
   const fileRef = useRef(null)
 
-  // ── Load data ─────────────────────────────────────────────
+  // ── Load seller data ────────────────────────────────────────
   useEffect(() => {
     Promise.all([
       getSellerProducts(currentUser.uid),
       getSellerOrders(currentUser.uid).catch(() => []),
-    ]).then(([prods, ords]) => {
-      setProducts(prods)
-      setOrders(ords)
-    }).catch(() => toast.error('Failed to load data'))
+    ])
+      .then(([prods, ords]) => { setProducts(prods); setOrders(ords) })
+      .catch(() => toast.error('Failed to load data'))
       .finally(() => setLoading(false))
-  }, [])
+  }, [currentUser.uid])
 
   const reloadProducts = async () => {
-    const data = await getSellerProducts(currentUser.uid)
-    setProducts(data)
+    const p = await getSellerProducts(currentUser.uid)
+    setProducts(p)
   }
 
-  const handleChange = e => setForm(f => ({ ...f, [e.target.name]: e.target.value }))
+  // ── Computed final price ────────────────────────────────────
+  const calcFinal = () => {
+    const p = parseFloat(form.price)
+    const d = parseFloat(form.discount) || 0
+    if (!p || p <= 0) return null
+    return +(p - p * d / 100).toFixed(2)
+  }
 
-  // ── Image ─────────────────────────────────────────────────
+  // ── Image helpers ───────────────────────────────────────────
   const processImage = (file) => {
     if (!file) return
     if (!file.type.startsWith('image/')) { toast.error('Select an image file'); return }
     if (file.size > 5 * 1024 * 1024)    { toast.error('Image must be under 5 MB'); return }
-    setImgFile(file); setPreview(URL.createObjectURL(file))
+    setImgFile(file)
+    setPreview(URL.createObjectURL(file))
   }
   const onFilePick  = e  => processImage(e.target.files[0])
   const onDrop      = e  => { e.preventDefault(); setDragOver(false); processImage(e.dataTransfer.files[0]) }
   const onDragOver  = e  => { e.preventDefault(); setDragOver(true) }
   const onDragLeave = () => setDragOver(false)
 
-  // ── Modal open ────────────────────────────────────────────
-  const openAdd = () => {
-    setForm(EMPTY_FORM); setEditId(null)
-    setImgFile(null); setPreview(''); setModal(true)
-  }
+  // ── Open edit form ──────────────────────────────────────────
   const openEdit = (p) => {
+    setEditItem(p)
     setForm({
-      title: p.title || '', description: p.description || '',
-      category: p.category || 'Electronics', brand: p.brand || '',
-      stock: p.stock ?? '', price: p.price || '', originalPrice: p.originalPrice || '',
-      imageUrl: p.imageUrl || '', imagePath: p.imagePath || '',
+      name:        p.title || '',
+      description: p.description || '',
+      category:    p.category || 'Electronics',
+      price:       p.price || '',
+      discount:    p.discount || '',
+      stock:       p.stock || '',
     })
-    setEditId(p.id); setPreview(p.imageUrl || ''); setImgFile(null); setModal(true)
+    setPreview(p.imageUrl || '')
+    setImgFile(null)
+    setView('add')
   }
 
-  // ── Discount ──────────────────────────────────────────────
-  const discountPct = () => {
-    const p = parseFloat(form.price), o = parseFloat(form.originalPrice)
-    return (p > 0 && o > p) ? Math.round(((o - p) / o) * 100) : null
-  }
+  const resetForm = () => { setForm(BLANK); setEditItem(null); setImgFile(null); setPreview('') }
 
-  // ── Save product ──────────────────────────────────────────
+  // ── Save product ────────────────────────────────────────────
   const handleSubmit = async (e) => {
     e.preventDefault()
-    if (!form.title.trim())               { toast.error('Title is required'); return }
-    if (!form.description.trim())         { toast.error('Description is required'); return }
-    if (!form.price || isNaN(form.price)) { toast.error('Valid price is required'); return }
-    if (!imgFile && !form.imageUrl)       { toast.error('Please upload a product image'); return }
+    if (!form.name.trim())               { toast.error('Product name is required');    return }
+    if (!form.description.trim())        { toast.error('Description is required');     return }
+    if (!form.price || isNaN(form.price)){ toast.error('Enter a valid price');         return }
+    if (!imgFile && !preview)            { toast.error('Upload a product image');      return }
 
     setSaving(true)
     try {
-      let { imageUrl, imagePath } = form
+      // Upload image via multer if a new file was chosen
+      let imageUrl = preview
       if (imgFile) {
-        if (editId && imagePath) await deleteProductImage(imagePath).catch(() => {})
-        const up = await uploadProductImage(imgFile, currentUser.uid)
-        imageUrl = up.url; imagePath = up.path
+        const fd = new FormData()
+        fd.append('image', imgFile)
+        const { data } = await axios.post(`${API}/api/upload`, fd, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        })
+        imageUrl = data.url
       }
+
+      const fp = calcFinal()
       const payload = {
-        title: form.title.trim(), description: form.description.trim(),
-        category: form.category, brand: form.brand.trim(),
-        price: parseFloat(form.price),
-        originalPrice: form.originalPrice ? parseFloat(form.originalPrice) : null,
-        discount: discountPct(),
-        stock: form.stock !== '' ? parseInt(form.stock) : null,
-        imageUrl, imagePath,
-        sellerUid: currentUser.uid,
-        sellerName: userProfile?.name || currentUser.displayName || 'Seller',
-        storeName: userProfile?.storeName || '',
+        title:         form.name.trim(),
+        description:   form.description.trim(),
+        category:      form.category,
+        brand:         '',
+        price:         parseFloat(form.price),
+        originalPrice: parseFloat(form.price),
+        discount:      parseFloat(form.discount) || 0,
+        finalPrice:    fp,
+        stock:         parseInt(form.stock) || 0,
+        imageUrl,
+        sellerUid:     currentUser.uid,
+        sellerName:    userProfile?.name  || currentUser.displayName || 'Seller',
+        storeName:     userProfile?.storeName || '',
       }
-      if (editId) { await updateProduct(editId, payload); toast.success('Product updated!') }
-      else        { await addProduct(payload);            toast.success('Product added!') }
-      setModal(false); reloadProducts()
-    } catch (err) { console.error(err); toast.error('Failed to save. Try again.') }
-    finally { setSaving(false) }
+
+      if (editItem) {
+        await updateProduct(editItem.id, payload)
+        toast.success('Product updated!')
+      } else {
+        await addProduct(payload)
+        toast.success('Product added!')
+      }
+
+      resetForm()
+      await reloadProducts()
+      setView('products')
+    } catch (err) {
+      console.error(err)
+      toast.error(err.response?.data?.error || 'Failed to save. Try again.')
+    } finally {
+      setSaving(false)
+    }
   }
 
-  // ── Delete product ────────────────────────────────────────
-  const handleDelete = async (product) => {
-    if (!window.confirm(`Delete "${product.title}"?`)) return
+  // ── Delete product ──────────────────────────────────────────
+  const handleDelete = async (p) => {
+    if (!window.confirm(`Delete "${p.title}"?`)) return
     try {
-      await deleteProduct(product.id)
-      if (product.imagePath) await deleteProductImage(product.imagePath).catch(() => {})
-      setProducts(prev => prev.filter(p => p.id !== product.id))
+      await deleteProduct(p.id)
+      setProducts(prev => prev.filter(x => x.id !== p.id))
       toast.success('Product deleted')
     } catch { toast.error('Failed to delete') }
   }
 
-  // ── Order status ──────────────────────────────────────────
+  // ── Update order status ─────────────────────────────────────
   const handleStatus = async (orderId, status) => {
     try {
       await updateOrderStatus(orderId, status)
       setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status } : o))
-      toast.success('Order status updated')
-    } catch { toast.error('Failed to update status') }
+      toast.success(`Status → ${status}`)
+    } catch { toast.error('Failed to update') }
   }
-
-  // ── Stats ─────────────────────────────────────────────────
-  const totalValue   = products.reduce((s, p) => s + (p.price || 0), 0)
-  const cats         = [...new Set(products.map(p => p.category))].length
-  const discCount    = products.filter(p => p.discount > 0).length
-  const pendingOrds  = orders.filter(o => o.status === 'pending').length
 
   if (loading) return <FullPageLoader />
 
-  // ── Render ────────────────────────────────────────────────
+  // ── Aggregated stats ────────────────────────────────────────
+  const catalogueValue = products.reduce((s, p) => s + (parseFloat(p.price) * (parseInt(p.stock) || 1)), 0)
+  const pendingCount   = orders.filter(o => o.status === 'pending').length
+  const onDiscount     = products.filter(p => parseFloat(p.discount) > 0).length
+
   return (
-    <div style={s.page}>
-      <div style={s.container}>
+    <div style={s.root}>
 
-        {/* Page Header */}
-        <div style={s.pageHeader}>
-          <div>
-            <h1 style={s.pageTitle}>Seller Dashboard</h1>
-            <p style={s.pageSub}>
-              Welcome, <strong style={{ color: '#2196F3' }}>
-                {userProfile?.storeName || userProfile?.name || 'Seller'}
-              </strong>
-            </p>
+      {/* ══════════════════════════════════════════════════
+          SIDEBAR
+      ══════════════════════════════════════════════════ */}
+      <aside style={s.sidebar}>
+
+        {/* Brand */}
+        <div style={s.brand}>
+          <span style={s.brandText}>Mega<span style={s.brandBlue}>Mart</span>X</span>
+          <span style={s.brandBadge}>Seller</span>
+        </div>
+
+        {/* Seller info */}
+        <div style={s.sellerCard}>
+          <div style={s.avatar}>{(userProfile?.name || 'S')[0].toUpperCase()}</div>
+          <div style={{ minWidth: 0 }}>
+            <div style={s.sellerName}>{userProfile?.name || 'Seller'}</div>
+            <div style={s.storeName}>{userProfile?.storeName || 'My Store'}</div>
           </div>
-          {tab === 'My Products' && (
-            <button style={s.addBtn} onClick={openAdd}>
-              <FiPlus size={17} /> Add New Product
-            </button>
-          )}
         </div>
 
-        {/* Stats Row */}
-        <div style={s.statsRow}>
-          {[
-            { icon: FiPackage,    label: 'Products',       val: products.length,         color: '#2196F3', bg: '#e3f2fd' },
-            { icon: FiDollarSign, label: 'Catalogue Value',val: formatPrice(totalValue),  color: '#10b981', bg: '#e8f5e9' },
-            { icon: FiShoppingBag,label: 'Total Orders',   val: orders.length,            color: '#7c3aed', bg: '#f3e8ff' },
-            { icon: FiClock,      label: 'Pending Orders', val: pendingOrds,              color: '#f59e0b', bg: '#fff8e1' },
-            { icon: FiPercent,    label: 'On Discount',    val: discCount,                color: '#e53935', bg: '#fce4ec' },
-          ].map(({ icon: Icon, label, val, color, bg }) => (
-            <div key={label} style={s.statCard}>
-              <div style={{ ...s.statIcon, background: bg, color }}><Icon size={20} /></div>
-              <div>
-                <p style={s.statVal}>{val}</p>
-                <p style={s.statLabel}>{label}</p>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {/* Tabs */}
-        <div style={s.tabBar}>
-          {TABS.map(t => (
+        {/* Navigation */}
+        <nav style={s.nav}>
+          {NAV.map(({ id, label, icon: Icon }) => (
             <button
-              key={t}
-              style={{ ...s.tab, ...(tab === t ? s.tabActive : {}) }}
-              onClick={() => setTab(t)}
+              key={id}
+              style={{ ...s.navItem, ...(view === id ? s.navActive : {}) }}
+              onClick={() => { if (id === 'add') resetForm(); setView(id) }}
             >
-              {t === 'Orders' && pendingOrds > 0 && (
-                <span style={s.tabBadge}>{pendingOrds}</span>
+              <Icon size={16} />
+              <span style={s.navLabel}>{label}</span>
+              {id === 'orders' && pendingCount > 0 && (
+                <span style={s.navBadge}>{pendingCount}</span>
               )}
-              {t}
             </button>
           ))}
-        </div>
+        </nav>
 
-        {/* ═══ PRODUCTS TAB ═══ */}
-        {tab === 'My Products' && (
-          <div style={s.panel}>
-            <div style={s.panelHead}>
-              <h2 style={s.panelTitle}>
-                My Products <span style={s.countPill}>{products.length}</span>
-              </h2>
+        {/* Logout at bottom */}
+        <button style={s.logoutBtn} onClick={logout}>
+          <FiLogOut size={15} /> Sign Out
+        </button>
+      </aside>
+
+      {/* ══════════════════════════════════════════════════
+          MAIN CONTENT
+      ══════════════════════════════════════════════════ */}
+      <main style={s.main}>
+
+        {/* ── Dashboard home ── */}
+        {view === 'dashboard' && (
+          <div>
+            <div style={s.pageHead}>
+              <h1 style={s.pageTitle}>Dashboard</h1>
+              <p style={s.pageSub}>Welcome back, <strong>{userProfile?.name || 'Seller'}</strong>!</p>
             </div>
 
-            {products.length === 0 ? (
-              <div style={s.empty}>
-                <div style={s.emptyIcon}><FiPackage size={40} color="#90caf9" /></div>
-                <p style={s.emptyTitle}>No products yet</p>
-                <p style={s.emptySub}>Add your first product to start selling</p>
-                <button style={s.addBtn} onClick={openAdd}><FiPlus size={15} /> Add Product</button>
-              </div>
-            ) : (
-              <div style={s.grid}>
-                {products.map(p => (
-                  <ProductCard key={p.id} product={p}
-                    onEdit={() => openEdit(p)} onDelete={() => handleDelete(p)} />
-                ))}
+            {/* Stats */}
+            <div style={s.statsGrid}>
+              {[
+                { label: 'Total Products', value: products.length,         icon: FiPackage,   color: '#2196F3' },
+                { label: 'Catalogue Value',value: formatPrice(catalogueValue), icon: FiDollarSign, color: '#10b981' },
+                { label: 'Total Orders',   value: orders.length,           icon: FiShoppingBag, color: '#8b5cf6' },
+                { label: 'Pending Orders', value: pendingCount,            icon: FiClock,     color: '#f59e0b' },
+                { label: 'On Discount',    value: onDiscount,              icon: FiPercent,   color: '#ef4444' },
+              ].map(stat => (
+                <div key={stat.label} style={s.statCard}>
+                  <div style={{ ...s.statIcon, background: stat.color + '18' }}>
+                    <stat.icon size={20} color={stat.color} />
+                  </div>
+                  <div>
+                    <div style={s.statValue}>{stat.value}</div>
+                    <div style={s.statLabel}>{stat.label}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Quick actions */}
+            <div style={s.quickRow}>
+              <button style={s.quickBtn} onClick={() => { resetForm(); setView('add') }}>
+                <FiPlus size={16} /> Add New Product
+              </button>
+              <button style={{ ...s.quickBtn, ...s.quickBtnOutline }} onClick={() => setView('orders')}>
+                <FiShoppingBag size={16} /> View Orders
+              </button>
+            </div>
+
+            {/* Recent products */}
+            {products.length > 0 && (
+              <div style={s.section}>
+                <h3 style={s.sectionTitle}>Recent Products</h3>
+                <div style={s.recentGrid}>
+                  {products.slice(0, 4).map(p => (
+                    <div key={p.id} style={s.recentCard}>
+                      <img
+                        src={p.imageUrl || imgFallback()}
+                        alt={p.title}
+                        style={s.recentImg}
+                        onError={e => { e.target.src = imgFallback() }}
+                      />
+                      <div style={s.recentInfo}>
+                        <div style={s.recentTitle}>{p.title}</div>
+                        <div style={s.recentPrice}>{formatPrice(p.price)}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
           </div>
         )}
 
-        {/* ═══ ORDERS TAB ═══ */}
-        {tab === 'Orders' && (
-          <div style={s.panel}>
-            <div style={s.panelHead}>
-              <h2 style={s.panelTitle}>
-                My Orders <span style={s.countPill}>{orders.length}</span>
-              </h2>
+        {/* ── Add / Edit Product ── */}
+        {view === 'add' && (
+          <div>
+            <div style={s.pageHead}>
+              <h1 style={s.pageTitle}>{editItem ? 'Edit Product' : 'Add New Product'}</h1>
+              <p style={s.pageSub}>{editItem ? `Editing: ${editItem.title}` : 'Fill in the details below'}</p>
+            </div>
+
+            <form onSubmit={handleSubmit} style={s.form}>
+
+              {/* ── Image upload ── */}
+              <div style={s.formCard}>
+                <div style={s.cardHead}><FiImage size={15} /> Product Image</div>
+
+                <div
+                  style={{ ...s.dropZone, ...(dragOver ? s.dropZoneActive : {}) }}
+                  onClick={() => fileRef.current?.click()}
+                  onDrop={onDrop}
+                  onDragOver={onDragOver}
+                  onDragLeave={onDragLeave}
+                >
+                  {preview ? (
+                    <div style={s.previewWrap}>
+                      <img src={preview} alt="preview" style={s.previewImg} />
+                      <button
+                        type="button"
+                        style={s.removeImg}
+                        onClick={e => { e.stopPropagation(); setPreview(''); setImgFile(null) }}
+                      >
+                        <FiX size={14} />
+                      </button>
+                    </div>
+                  ) : (
+                    <div style={s.dropContent}>
+                      <FiUpload size={28} color="#90caf9" />
+                      <p style={s.dropText}>Click or drag &amp; drop to upload</p>
+                      <p style={s.dropHint}>PNG, JPG, WEBP — max 5 MB</p>
+                    </div>
+                  )}
+                </div>
+                <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={onFilePick} />
+              </div>
+
+              {/* ── Product info ── */}
+              <div style={s.formCard}>
+                <div style={s.cardHead}><FiInfo size={15} /> Product Information</div>
+                <div style={s.formGrid}>
+
+                  <div style={{ gridColumn: '1 / -1', ...s.field }}>
+                    <label style={s.label}>Product Name <span style={s.req}>*</span></label>
+                    <input
+                      style={s.input}
+                      name="name"
+                      placeholder="e.g. Wireless Bluetooth Headphones"
+                      value={form.name}
+                      onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+                      maxLength={200}
+                    />
+                  </div>
+
+                  <div style={{ gridColumn: '1 / -1', ...s.field }}>
+                    <label style={s.label}>Description <span style={s.req}>*</span></label>
+                    <textarea
+                      style={{ ...s.input, height: '100px', resize: 'vertical' }}
+                      name="description"
+                      placeholder="Describe your product in detail…"
+                      value={form.description}
+                      onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
+                      maxLength={1000}
+                    />
+                    <div style={s.charCount}>{form.description.length} / 1000</div>
+                  </div>
+
+                </div>
+              </div>
+
+              {/* ── Category & Stock ── */}
+              <div style={s.formCard}>
+                <div style={s.cardHead}><FiLayers size={15} /> Category &amp; Stock</div>
+                <div style={s.formGrid}>
+
+                  <div style={s.field}>
+                    <label style={s.label}>Category <span style={s.req}>*</span></label>
+                    <select
+                      style={s.input}
+                      value={form.category}
+                      onChange={e => setForm(f => ({ ...f, category: e.target.value }))}
+                    >
+                      {CATS.map(c => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                  </div>
+
+                  <div style={s.field}>
+                    <label style={s.label}>Stock Quantity</label>
+                    <input
+                      style={s.input}
+                      type="number"
+                      name="stock"
+                      placeholder="0"
+                      min="0"
+                      value={form.stock}
+                      onChange={e => setForm(f => ({ ...f, stock: e.target.value }))}
+                    />
+                  </div>
+
+                </div>
+              </div>
+
+              {/* ── Pricing & Discount ── */}
+              <div style={s.formCard}>
+                <div style={s.cardHead}><FiDollarSign size={15} /> Pricing &amp; Discount</div>
+                <div style={s.formGrid}>
+
+                  <div style={s.field}>
+                    <label style={s.label}>Price (USD) <span style={s.req}>*</span></label>
+                    <div style={s.inputWrap}>
+                      <span style={s.inputPre}>$</span>
+                      <input
+                        style={{ ...s.input, borderLeft: 'none', borderTopLeftRadius: 0, borderBottomLeftRadius: 0 }}
+                        type="number"
+                        name="price"
+                        placeholder="0.00"
+                        min="0"
+                        step="0.01"
+                        value={form.price}
+                        onChange={e => setForm(f => ({ ...f, price: e.target.value }))}
+                      />
+                    </div>
+                  </div>
+
+                  <div style={s.field}>
+                    <label style={s.label}>Discount (%)</label>
+                    <div style={s.inputWrap}>
+                      <input
+                        style={{ ...s.input, borderRight: 'none', borderTopRightRadius: 0, borderBottomRightRadius: 0 }}
+                        type="number"
+                        name="discount"
+                        placeholder="0"
+                        min="0"
+                        max="100"
+                        value={form.discount}
+                        onChange={e => setForm(f => ({ ...f, discount: e.target.value }))}
+                      />
+                      <span style={s.inputSuf}>%</span>
+                    </div>
+                  </div>
+
+                  {/* Final price preview */}
+                  {calcFinal() !== null && (
+                    <div style={{ ...s.field, gridColumn: '1 / -1' }}>
+                      <div style={s.finalPriceBox}>
+                        <FiCheck size={14} color="#2e7d32" />
+                        <span>Final Price:</span>
+                        <strong style={{ color: '#2196F3', fontSize: '18px' }}>
+                          {formatPrice(calcFinal())}
+                        </strong>
+                        {parseFloat(form.discount) > 0 && (
+                          <span style={s.saveBadge}>
+                            Save {formatPrice(parseFloat(form.price) - calcFinal())} ({form.discount}% off)
+                          </span>
+                        )}
+                      </div>
+                      <div style={s.formulaNote}>
+                        Final Price = Price − (Price × Discount / 100)
+                      </div>
+                    </div>
+                  )}
+
+                </div>
+              </div>
+
+              {/* Action buttons */}
+              <div style={s.formActions}>
+                <button
+                  type="button"
+                  style={s.cancelBtn}
+                  onClick={() => { resetForm(); setView('products') }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  style={{ ...s.saveBtn, opacity: saving ? 0.75 : 1 }}
+                  disabled={saving}
+                >
+                  {saving
+                    ? (editItem ? 'Updating…' : 'Adding…')
+                    : (editItem ? 'Update Product' : 'Add Product')
+                  }
+                </button>
+              </div>
+
+            </form>
+          </div>
+        )}
+
+        {/* ── My Products ── */}
+        {view === 'products' && (
+          <div>
+            <div style={{ ...s.pageHead, ...s.pageHeadRow }}>
+              <div>
+                <h1 style={s.pageTitle}>My Products</h1>
+                <p style={s.pageSub}>{products.length} product{products.length !== 1 ? 's' : ''} listed</p>
+              </div>
+              <button style={s.addBtn} onClick={() => { resetForm(); setView('add') }}>
+                <FiPlus size={15} /> Add Product
+              </button>
+            </div>
+
+            {products.length === 0 ? (
+              <div style={s.empty}>
+                <FiPackage size={48} color="#90caf9" />
+                <h3 style={{ color: '#000', margin: '12px 0 4px' }}>No products yet</h3>
+                <p style={{ color: '#777', margin: 0 }}>Click "Add Product" to list your first item.</p>
+              </div>
+            ) : (
+              <div style={s.productGrid}>
+                {products.map(p => {
+                  const discNum = parseFloat(p.discount) || 0
+                  const fp = discNum > 0
+                    ? +(parseFloat(p.price) - parseFloat(p.price) * discNum / 100).toFixed(2)
+                    : null
+                  return (
+                    <div key={p.id} style={s.productCard}>
+                      {/* Image */}
+                      <div style={s.productImgWrap}>
+                        <img
+                          src={p.imageUrl || imgFallback()}
+                          alt={p.title}
+                          style={s.productImg}
+                          onError={e => { e.target.src = imgFallback() }}
+                        />
+                        {discNum > 0 && (
+                          <div style={s.discBadge}>{discNum}% OFF</div>
+                        )}
+                        {(parseInt(p.stock) || 0) === 0 && (
+                          <div style={s.outBadge}>Out of Stock</div>
+                        )}
+                      </div>
+
+                      {/* Info */}
+                      <div style={s.productBody}>
+                        <div style={s.productCat}>{p.category}</div>
+                        <div style={s.productTitle}>{p.title}</div>
+                        <div style={s.productDesc}>{p.description}</div>
+
+                        <div style={s.productPricing}>
+                          <span style={s.productPrice}>
+                            {fp ? formatPrice(fp) : formatPrice(p.price)}
+                          </span>
+                          {fp && (
+                            <span style={s.productOrig}>{formatPrice(p.price)}</span>
+                          )}
+                        </div>
+
+                        <div style={s.productMeta}>
+                          <span style={s.stockText}>
+                            {(parseInt(p.stock) || 0) > 0
+                              ? `${p.stock} in stock`
+                              : 'Out of stock'}
+                          </span>
+                        </div>
+
+                        <div style={s.productBtns}>
+                          <button style={s.editBtn} onClick={() => openEdit(p)}>
+                            <FiEdit2 size={13} /> Edit
+                          </button>
+                          <button style={s.deleteBtn} onClick={() => handleDelete(p)}>
+                            <FiTrash2 size={13} /> Delete
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── Orders ── */}
+        {view === 'orders' && (
+          <div>
+            <div style={s.pageHead}>
+              <h1 style={s.pageTitle}>Orders</h1>
+              <p style={s.pageSub}>{orders.length} order{orders.length !== 1 ? 's' : ''} · {pendingCount} pending</p>
             </div>
 
             {orders.length === 0 ? (
               <div style={s.empty}>
-                <div style={s.emptyIcon}><FiShoppingBag size={40} color="#90caf9" /></div>
-                <p style={s.emptyTitle}>No orders yet</p>
-                <p style={s.emptySub}>Orders from buyers will appear here</p>
+                <FiShoppingBag size={48} color="#90caf9" />
+                <h3 style={{ color: '#000', margin: '12px 0 4px' }}>No orders yet</h3>
+                <p style={{ color: '#777', margin: 0 }}>Orders from buyers will appear here.</p>
               </div>
             ) : (
-              <div style={s.orderList}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                 {orders.map(order => {
-                  const myItems = (order.items || []).filter(
-                    i => i.sellerUid === currentUser.uid
-                  )
-                  const myTotal = myItems.reduce(
-                    (s, i) => s + i.price * i.quantity, 0
-                  )
-                  const isOpen = expanded === order.id
-                  const sc = STATUS_COLORS[order.status] || '#888'
+                  const myItems  = (order.items || []).filter(i => i.sellerUid === currentUser.uid)
+                  const myEarn   = myItems.reduce((s, i) => s + (parseFloat(i.price) * (i.quantity || 1)), 0)
+                  const isOpen   = expanded === order.id
+                  const sc       = STATUS_COLORS[order.status] || '#888'
 
                   return (
                     <div key={order.id} style={s.orderCard}>
-                      {/* Order header row */}
-                      <div
-                        style={s.orderHead}
-                        onClick={() => setExpanded(isOpen ? null : order.id)}
-                      >
+                      {/* Order header */}
+                      <div style={s.orderHead} onClick={() => setExpanded(isOpen ? null : order.id)}>
                         <div style={s.orderLeft}>
-                          <p style={s.orderId}>#{order.id.slice(-8).toUpperCase()}</p>
-                          <p style={s.orderDate}>{formatDate(order.createdAt)}</p>
+                          <div style={s.orderId}>#{order.id.slice(-8).toUpperCase()}</div>
+                          <div style={s.orderDate}>{formatDate(order.createdAt)}</div>
                         </div>
-
                         <div style={s.orderMid}>
-                          <div style={s.buyerInfo}>
-                            <div style={s.buyerAvatar}>
-                              {order.userName?.[0]?.toUpperCase() || '?'}
-                            </div>
-                            <div>
-                              <p style={s.buyerName}>{order.userName || 'Customer'}</p>
-                              <p style={s.buyerEmail}>{order.userEmail}</p>
-                            </div>
-                          </div>
+                          <div style={s.buyerName}>{order.userName || 'Customer'}</div>
+                          <div style={s.buyerEmail}>{order.userEmail}</div>
                         </div>
-
                         <div style={s.orderRight}>
-                          <span style={s.orderItemCount}>
-                            {myItems.length} item{myItems.length !== 1 ? 's' : ''}
-                          </span>
-                          <span style={s.orderTotal}>{formatPrice(myTotal)}</span>
-                          <span style={{
-                            ...s.statusBadge,
-                            color: sc,
-                            background: sc + '18',
-                            border: `1px solid ${sc}44`,
-                          }}>
-                            {order.status
-                              ? order.status.charAt(0).toUpperCase() + order.status.slice(1)
-                              : 'Pending'}
-                          </span>
-                          {isOpen
-                            ? <FiChevronUp size={15} color="#aaa" />
-                            : <FiChevronDown size={15} color="#aaa" />}
+                          <div style={{ ...s.statusBadge, background: sc + '18', color: sc, border: `1px solid ${sc}40` }}>
+                            {order.status}
+                          </div>
+                          <div style={s.orderEarn}>{formatPrice(myEarn)}</div>
+                        </div>
+                        <div style={{ color: '#aaa' }}>
+                          {isOpen ? <FiChevronUp size={16} /> : <FiChevronDown size={16} />}
                         </div>
                       </div>
 
                       {/* Expanded detail */}
                       {isOpen && (
-                        <div style={s.orderDetail}>
-
-                          {/* Items from this seller only */}
-                          <p style={s.detailSectionLabel}>Your items in this order</p>
-                          <div style={s.itemsList}>
-                            {myItems.map((item, i) => (
-                              <div key={i} style={s.itemRow}>
+                        <div style={s.orderBody}>
+                          {/* My items in this order */}
+                          <div style={s.orderItems}>
+                            {myItems.length > 0 ? myItems.map((item, i) => (
+                              <div key={i} style={s.orderItem}>
                                 <img
-                                  src={item.imageUrl || imgFallback(50, 50)}
+                                  src={item.imageUrl || imgFallback(60, 60)}
                                   alt={item.title}
-                                  style={s.itemImg}
-                                  onError={e => { e.target.src = imgFallback(50, 50) }}
+                                  style={s.orderItemImg}
+                                  onError={e => { e.target.src = imgFallback(60, 60) }}
                                 />
-                                <div style={s.itemInfo}>
-                                  <p style={s.itemTitle}>{item.title}</p>
-                                  <p style={s.itemQty}>Qty: {item.quantity}</p>
+                                <div style={{ flex: 1 }}>
+                                  <div style={s.orderItemTitle}>{item.title}</div>
+                                  <div style={s.orderItemMeta}>
+                                    Qty: {item.quantity} · {formatPrice(item.price)} each
+                                  </div>
                                 </div>
-                                <span style={s.itemPrice}>
-                                  {formatPrice(item.price * item.quantity)}
-                                </span>
+                                <div style={s.orderItemTotal}>
+                                  {formatPrice(item.price * (item.quantity || 1))}
+                                </div>
                               </div>
+                            )) : (
+                              <p style={{ color: '#aaa', fontSize: '13px', margin: 0 }}>
+                                No items from your store in this order.
+                              </p>
+                            )}
+                          </div>
+
+                          {/* Status buttons */}
+                          <div style={s.statusRow}>
+                            <span style={s.statusLabel}>Update Status:</span>
+                            {['pending', 'processing', 'shipped', 'delivered', 'cancelled'].map(st => (
+                              <button
+                                key={st}
+                                style={{
+                                  ...s.stBtn,
+                                  background: order.status === st ? STATUS_COLORS[st] : 'transparent',
+                                  color:      order.status === st ? '#fff' : STATUS_COLORS[st],
+                                  border:     `1.5px solid ${STATUS_COLORS[st]}`,
+                                }}
+                                onClick={() => handleStatus(order.id, st)}
+                              >
+                                {st}
+                              </button>
                             ))}
                           </div>
-
-                          {/* Total for this seller */}
-                          <div style={s.myTotalRow}>
-                            <span style={s.myTotalLabel}>Your earnings from this order</span>
-                            <span style={s.myTotalVal}>{formatPrice(myTotal)}</span>
-                          </div>
-
-                          {/* Status control */}
-                          <div style={s.statusRow}>
-                            <p style={s.detailSectionLabel} >Update Order Status</p>
-                            <div style={s.statusBtns}>
-                              {['pending', 'processing', 'shipped', 'delivered', 'cancelled'].map(st => {
-                                const active = order.status === st
-                                const c = STATUS_COLORS[st] || '#888'
-                                return (
-                                  <button
-                                    key={st}
-                                    style={{
-                                      ...s.statusBtn,
-                                      background: active ? c : '#f9fcff',
-                                      color: active ? '#fff' : c,
-                                      border: `1.5px solid ${c}`,
-                                    }}
-                                    onClick={() => handleStatus(order.id, st)}
-                                  >
-                                    {st.charAt(0).toUpperCase() + st.slice(1)}
-                                  </button>
-                                )
-                              })}
-                            </div>
-                          </div>
-
                         </div>
                       )}
                     </div>
@@ -383,565 +688,318 @@ const SellerDashboard = () => {
             )}
           </div>
         )}
-      </div>
 
-      {/* ═══════════════════════════════
-          ADD / EDIT PRODUCT MODAL
-      ═══════════════════════════════ */}
-      {modal && (
-        <div style={s.overlay} onClick={e => e.target === e.currentTarget && setModal(false)}>
-          <div style={s.modal}>
-
-            <div style={s.modalHeader}>
-              <div>
-                <h2 style={s.modalTitle}>{editId ? 'Edit Product' : 'Add New Product'}</h2>
-                <p style={s.modalSub}>Fill in all the details below</p>
-              </div>
-              <button style={s.closeBtn} onClick={() => setModal(false)}><FiX size={20} /></button>
-            </div>
-
-            <form onSubmit={handleSubmit}>
-
-              {/* 1 — Image */}
-              <FormSection step="1" icon={<FiImage size={14} />} title="Product Image" required>
-                <div
-                  style={{ ...s.dropZone, ...(dragOver ? s.dropActive : {}), ...(preview ? s.dropHasImg : {}) }}
-                  onClick={() => fileRef.current.click()}
-                  onDrop={onDrop} onDragOver={onDragOver} onDragLeave={onDragLeave}
-                >
-                  {preview ? (
-                    <div style={s.previewWrap}
-                      onMouseEnter={() => setHoverImg(true)}
-                      onMouseLeave={() => setHoverImg(false)}
-                    >
-                      <img src={preview} alt="preview" style={s.previewImg} />
-                      <div style={{ ...s.previewOverlay, opacity: hoverImg ? 1 : 0 }}>
-                        <FiUpload size={22} color="#fff" />
-                        <span style={{ color: '#fff', fontSize: '13px', fontWeight: 600 }}>Click to change</span>
-                      </div>
-                    </div>
-                  ) : (
-                    <div style={s.dropContent}>
-                      <div style={s.dropIconBox}><FiUpload size={28} color="#2196F3" /></div>
-                      <p style={s.dropTitle}>Drag & drop or click to upload</p>
-                      <p style={s.dropSub}>PNG · JPG · WEBP — max 5 MB</p>
-                    </div>
-                  )}
-                  <input ref={fileRef} type="file" accept="image/*"
-                    style={{ display: 'none' }} onChange={onFilePick} />
-                </div>
-              </FormSection>
-
-              {/* 2 — Product Info */}
-              <FormSection step="2" icon={<FiInfo size={14} />} title="Product Information" required>
-                <div style={s.fieldStack}>
-                  <Field label="Product Title *">
-                    <input style={s.input} name="title"
-                      placeholder="e.g. Wireless Bluetooth Headphones Pro Max"
-                      value={form.title} onChange={handleChange} maxLength={120} />
-                    <span style={s.charCount}>{form.title.length}/120</span>
-                  </Field>
-                  <Field label="Description *">
-                    <textarea style={{ ...s.input, minHeight: '100px', resize: 'vertical' }}
-                      name="description"
-                      placeholder="Describe your product — features, materials, dimensions, what's included…"
-                      value={form.description} onChange={handleChange} maxLength={1000} />
-                    <span style={s.charCount}>{form.description.length}/1000</span>
-                  </Field>
-                  <Field label="Brand / Manufacturer (optional)">
-                    <input style={s.input} name="brand"
-                      placeholder="e.g. Sony, Nike, Samsung"
-                      value={form.brand} onChange={handleChange} />
-                  </Field>
-                </div>
-              </FormSection>
-
-              {/* 3 — Category & Stock */}
-              <FormSection step="3" icon={<FiLayers size={14} />} title="Category & Stock">
-                <div style={s.row2}>
-                  <Field label="Category *">
-                    <select style={s.select} name="category"
-                      value={form.category} onChange={handleChange}>
-                      {CATEGORIES.slice(1).map(c => (
-                        <option key={c} value={c}>{c}</option>
-                      ))}
-                    </select>
-                  </Field>
-                  <Field label="Stock Quantity">
-                    <div style={s.inputIcon}>
-                      <FiBox size={14} color="#90caf9" />
-                      <input style={s.inputInner} name="stock" type="number" min="0"
-                        placeholder="e.g. 50" value={form.stock} onChange={handleChange} />
-                    </div>
-                    {form.stock !== '' && (
-                      <span style={{ ...s.stockHint, color: parseInt(form.stock) > 0 ? '#10b981' : '#e53935' }}>
-                        {parseInt(form.stock) > 0 ? `${form.stock} units listed` : 'Will show Out of Stock'}
-                      </span>
-                    )}
-                  </Field>
-                </div>
-              </FormSection>
-
-              {/* 4 — Pricing */}
-              <FormSection step="4" icon={<FiTag size={14} />} title="Pricing & Discount" required>
-                <div style={s.row2}>
-                  <Field label="Selling Price (USD) *">
-                    <div style={s.priceWrap}>
-                      <span style={s.pricePfx}>$</span>
-                      <input style={s.priceInput} name="price" type="number"
-                        min="0" step="0.01" placeholder="0.00"
-                        value={form.price} onChange={handleChange} required />
-                    </div>
-                  </Field>
-                  <Field label="Original Price (for discount)">
-                    <div style={s.priceWrap}>
-                      <span style={s.pricePfx}>$</span>
-                      <input style={s.priceInput} name="originalPrice" type="number"
-                        min="0" step="0.01" placeholder="0.00"
-                        value={form.originalPrice} onChange={handleChange} />
-                    </div>
-                  </Field>
-                </div>
-
-                {discountPct() !== null ? (
-                  <div style={s.discountBox}>
-                    <div style={s.discountLeft}>
-                      <span style={s.discBadgeLg}>{discountPct()}% OFF</span>
-                      <div>
-                        <p style={s.discTitle}>Discount Active</p>
-                        <p style={s.discSub}>
-                          Customers save <strong>
-                            {formatPrice(parseFloat(form.originalPrice) - parseFloat(form.price))}
-                          </strong>
-                        </p>
-                      </div>
-                    </div>
-                    <div style={s.discPrices}>
-                      <span style={s.discSellPrice}>{formatPrice(parseFloat(form.price))}</span>
-                      <span style={s.discOrigPrice}>{formatPrice(parseFloat(form.originalPrice))}</span>
-                    </div>
-                  </div>
-                ) : (
-                  <div style={s.discountTip}>
-                    <FiAlertCircle size={14} color="#f59e0b" style={{ flexShrink: 0 }} />
-                    <span>Set <strong>Original Price</strong> higher than Selling Price to show a discount badge.</span>
-                  </div>
-                )}
-              </FormSection>
-
-              <button type="submit"
-                style={{ ...s.saveBtn, opacity: saving ? 0.75 : 1 }}
-                disabled={saving}
-              >
-                {saving
-                  ? <><div style={s.btnSpinner} />{editId ? 'Updating…' : 'Adding…'}</>
-                  : <><FiCheckCircle size={18} />{editId ? 'Update Product' : 'Add Product to Store'}</>
-                }
-              </button>
-            </form>
-          </div>
-        </div>
-      )}
+      </main>
     </div>
   )
 }
 
-// ── Product Card ──────────────────────────────────────────────
-const ProductCard = ({ product: p, onEdit, onDelete }) => (
-  <div style={pc.card}>
-    <div style={pc.imgBox}>
-      <img src={p.imageUrl || imgFallback(300, 200)} alt={p.title} style={pc.img}
-        onError={e => { e.target.src = imgFallback(300, 200) }} />
-      {p.discount > 0 && <span style={pc.discBadge}>-{p.discount}%</span>}
-      <span style={pc.catBadge}>{p.category}</span>
-    </div>
-    <div style={pc.body}>
-      <p style={pc.title}>{p.title}</p>
-      {p.brand && <p style={pc.brand}>{p.brand}</p>}
-      <p style={pc.desc}>{p.description?.slice(0, 80)}{p.description?.length > 80 ? '…' : ''}</p>
-      <div style={pc.priceRow}>
-        <span style={pc.price}>{formatPrice(p.price)}</span>
-        {p.originalPrice > p.price && <span style={pc.origPrice}>{formatPrice(p.originalPrice)}</span>}
-        {p.discount > 0 && <span style={pc.savePill}>Save {p.discount}%</span>}
-      </div>
-      <div style={pc.stockRow}>
-        <div style={{ ...pc.stockDot, background: p.stock > 0 ? '#10b981' : '#e53935' }} />
-        <span style={{ ...pc.stockLabel, color: p.stock > 0 ? '#10b981' : '#e53935' }}>
-          {p.stock != null ? (p.stock > 0 ? `${p.stock} in stock` : 'Out of stock') : 'Stock not set'}
-        </span>
-      </div>
-      <div style={pc.actions}>
-        <button style={pc.editBtn} onClick={onEdit}><FiEdit2 size={13} /> Edit</button>
-        <button style={pc.delBtn} onClick={onDelete}><FiTrash2 size={13} /> Delete</button>
-      </div>
-    </div>
-  </div>
-)
-
-// ── FormSection ───────────────────────────────────────────────
-const FormSection = ({ step, icon, title, required, children }) => (
-  <div style={fs.wrap}>
-    <div style={fs.header}>
-      <div style={fs.stepBadge}>{step}</div>
-      <div style={{ color: '#2196F3' }}>{icon}</div>
-      <span style={fs.title}>{title}</span>
-      {required && <span style={fs.req}>required</span>}
-    </div>
-    <div style={fs.body}>{children}</div>
-  </div>
-)
-
-const Field = ({ label, children }) => (
-  <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-    <label style={{ color: '#444', fontSize: '12px', fontWeight: 600 }}>{label}</label>
-    {children}
-  </div>
-)
-
-// ── Styles ────────────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════
+// STYLES
+// ════════════════════════════════════════════════════════════
 const s = {
-  page:      { background: '#f8fbff', minHeight: '100vh', padding: '32px 0 72px' },
-  container: { maxWidth: '1200px', margin: '0 auto', padding: '0 20px' },
-
-  pageHeader: {
-    display: 'flex', justifyContent: 'space-between',
-    alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px', marginBottom: '28px',
+  // Layout
+  root: {
+    display: 'flex', minHeight: '100vh',
+    background: '#f0f4f8', fontFamily: 'inherit',
   },
-  pageTitle: { color: '#000', fontSize: '26px', fontWeight: 700, margin: '0 0 4px' },
-  pageSub:   { color: '#777', fontSize: '14px', margin: 0 },
 
-  addBtn: {
+  // ── Sidebar ────────────────────────────────────────────────
+  sidebar: {
+    width: '240px', flexShrink: 0,
+    background: '#fff',
+    borderRight: '1px solid #e3f2fd',
+    display: 'flex', flexDirection: 'column',
+    position: 'sticky', top: 0, height: '100vh',
+    overflowY: 'auto',
+    boxShadow: '2px 0 12px rgba(33,150,243,0.06)',
+  },
+  brand: {
+    padding: '20px 20px 16px',
     display: 'flex', alignItems: 'center', gap: '8px',
-    padding: '11px 22px',
-    background: 'linear-gradient(135deg, #2196F3 0%, #1565C0 100%)',
-    color: '#fff', border: 'none', borderRadius: '10px',
-    fontSize: '14px', fontWeight: 700, cursor: 'pointer',
-    boxShadow: '0 4px 14px rgba(33,150,243,0.35)',
+    borderBottom: '1px solid #e3f2fd',
   },
-
-  statsRow: {
-    display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(175px, 1fr))',
-    gap: '14px', marginBottom: '24px',
+  brandText: { fontSize: '18px', fontWeight: 800, color: '#000' },
+  brandBlue: { color: '#2196F3' },
+  brandBadge: {
+    background: '#e3f2fd', color: '#2196F3',
+    fontSize: '10px', fontWeight: 700,
+    padding: '2px 7px', borderRadius: '10px',
+    border: '1px solid #90caf9',
   },
-  statCard: {
-    display: 'flex', alignItems: 'center', gap: '14px',
-    background: '#fff', border: '1px solid #e3f2fd',
-    borderRadius: '14px', padding: '16px 18px',
-    boxShadow: '0 2px 8px rgba(33,150,243,0.05)',
-  },
-  statIcon: {
-    width: '44px', height: '44px', borderRadius: '12px',
-    display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-  },
-  statVal:   { color: '#000', fontSize: '22px', fontWeight: 800, margin: '0 0 2px' },
-  statLabel: { color: '#777', fontSize: '12px', margin: 0 },
-
-  // Tabs
-  tabBar: {
-    display: 'flex', gap: '4px',
-    borderBottom: '2px solid #e3f2fd', marginBottom: '24px',
-  },
-  tab: {
-    position: 'relative',
-    display: 'flex', alignItems: 'center', gap: '8px',
-    padding: '11px 22px', background: 'none', border: 'none',
-    borderBottom: '2px solid transparent', marginBottom: '-2px',
-    color: '#888', fontSize: '14px', fontWeight: 500, cursor: 'pointer',
-  },
-  tabActive: { color: '#2196F3', borderBottomColor: '#2196F3', fontWeight: 700 },
-  tabBadge: {
-    background: '#e53935', color: '#fff',
-    fontSize: '10px', fontWeight: 800,
-    padding: '1px 6px', borderRadius: '20px',
-  },
-
-  // Panel
-  panel: {
-    background: '#fff', border: '1px solid #e3f2fd',
-    borderRadius: '16px', padding: '24px',
-    boxShadow: '0 2px 12px rgba(33,150,243,0.05)',
-  },
-  panelHead: { marginBottom: '20px' },
-  panelTitle: {
-    color: '#000', fontSize: '17px', fontWeight: 700, margin: 0,
+  sellerCard: {
+    margin: '12px 14px',
+    padding: '12px', background: '#f0f8ff',
+    border: '1px solid #e3f2fd', borderRadius: '12px',
     display: 'flex', alignItems: 'center', gap: '10px',
   },
-  countPill: {
-    background: '#e3f2fd', color: '#1565C0',
-    borderRadius: '20px', padding: '2px 10px',
-    fontSize: '13px', fontWeight: 700,
-  },
-
-  empty: {
-    display: 'flex', flexDirection: 'column',
-    alignItems: 'center', gap: '10px', padding: '60px 24px',
-  },
-  emptyIcon: {
-    width: '80px', height: '80px', background: '#e3f2fd',
-    borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
-    marginBottom: '6px',
-  },
-  emptyTitle: { color: '#000', fontSize: '18px', fontWeight: 700, margin: 0 },
-  emptySub:   { color: '#888', fontSize: '14px', margin: 0 },
-
-  grid: {
-    display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '20px',
-  },
-
-  // Orders
-  orderList: { display: 'flex', flexDirection: 'column', gap: '12px' },
-  orderCard: {
-    border: '1.5px solid #e3f2fd', borderRadius: '14px', overflow: 'hidden',
-    background: '#fff',
-  },
-  orderHead: {
-    display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '12px',
-    padding: '16px 20px', cursor: 'pointer',
-    borderBottom: '1px solid transparent',
-  },
-  orderLeft: { minWidth: '120px' },
-  orderId:   { color: '#000', fontSize: '14px', fontWeight: 700, margin: '0 0 3px' },
-  orderDate: { color: '#aaa', fontSize: '12px', margin: 0 },
-  orderMid:  { flex: 1, minWidth: '160px' },
-  buyerInfo: { display: 'flex', alignItems: 'center', gap: '10px' },
-  buyerAvatar: {
-    width: '34px', height: '34px', borderRadius: '50%',
-    background: '#e3f2fd', color: '#2196F3',
+  avatar: {
+    width: '36px', height: '36px', borderRadius: '50%',
+    background: '#2196F3', color: '#fff',
     display: 'flex', alignItems: 'center', justifyContent: 'center',
-    fontSize: '14px', fontWeight: 700, flexShrink: 0,
+    fontSize: '16px', fontWeight: 700, flexShrink: 0,
   },
-  buyerName:  { color: '#000', fontSize: '13px', fontWeight: 600, margin: '0 0 2px' },
-  buyerEmail: { color: '#aaa', fontSize: '11px', margin: 0 },
-  orderRight: {
-    display: 'flex', alignItems: 'center', gap: '12px',
-    flexWrap: 'wrap', marginLeft: 'auto',
+  sellerName: { fontSize: '13px', fontWeight: 700, color: '#000', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
+  storeName:  { fontSize: '11px', color: '#888', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
+
+  nav: { display: 'flex', flexDirection: 'column', gap: '2px', padding: '8px 10px', flex: 1 },
+  navItem: {
+    display: 'flex', alignItems: 'center', gap: '10px',
+    padding: '10px 12px', borderRadius: '10px',
+    background: 'none', border: 'none', cursor: 'pointer',
+    color: '#555', fontSize: '14px', fontWeight: 500,
+    textAlign: 'left', width: '100%', position: 'relative',
+    transition: 'background .15s',
   },
-  orderItemCount: { color: '#777', fontSize: '12px' },
-  orderTotal: { color: '#2196F3', fontSize: '15px', fontWeight: 800 },
-  statusBadge: {
-    fontSize: '12px', fontWeight: 600, padding: '4px 12px', borderRadius: '20px',
+  navActive: { background: '#e3f2fd', color: '#2196F3', fontWeight: 700 },
+  navLabel:  { flex: 1 },
+  navBadge:  {
+    background: '#ef4444', color: '#fff',
+    fontSize: '11px', fontWeight: 700,
+    padding: '1px 6px', borderRadius: '10px', minWidth: '18px', textAlign: 'center',
+  },
+  logoutBtn: {
+    display: 'flex', alignItems: 'center', gap: '8px',
+    margin: '8px 10px 16px', padding: '10px 12px',
+    borderRadius: '10px', background: 'none',
+    border: '1px solid #ffcdd2', color: '#e53935',
+    fontSize: '13px', fontWeight: 600, cursor: 'pointer',
   },
 
-  orderDetail: {
-    borderTop: '1px solid #e3f2fd', padding: '18px 20px',
-    background: '#f9fcff',
-    display: 'flex', flexDirection: 'column', gap: '16px',
+  // ── Main ───────────────────────────────────────────────────
+  main:    { flex: 1, padding: '32px', overflowY: 'auto', minWidth: 0 },
+  pageHead: { marginBottom: '24px' },
+  pageHeadRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
+  pageTitle: { color: '#000', fontSize: '24px', fontWeight: 700, margin: 0 },
+  pageSub:   { color: '#777', fontSize: '14px', margin: '4px 0 0' },
+
+  // Stats
+  statsGrid: {
+    display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))',
+    gap: '16px', marginBottom: '24px',
   },
-  detailSectionLabel: {
-    color: '#555', fontSize: '12px', fontWeight: 700,
-    textTransform: 'uppercase', letterSpacing: '0.5px', margin: 0,
-  },
-  itemsList: { display: 'flex', flexDirection: 'column', gap: '8px' },
-  itemRow: {
-    display: 'flex', alignItems: 'center', gap: '12px',
+  statCard: {
     background: '#fff', border: '1px solid #e3f2fd',
-    borderRadius: '10px', padding: '10px 14px',
+    borderRadius: '14px', padding: '18px 20px',
+    display: 'flex', alignItems: 'center', gap: '14px',
+    boxShadow: '0 2px 10px rgba(33,150,243,0.06)',
   },
-  itemImg: {
-    width: '48px', height: '48px', objectFit: 'cover',
-    borderRadius: '8px', background: '#e3f2fd', flexShrink: 0,
-  },
-  itemInfo: { flex: 1, minWidth: 0 },
-  itemTitle: {
-    color: '#000', fontSize: '13px', fontWeight: 500, margin: '0 0 3px',
-    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-  },
-  itemQty:   { color: '#888', fontSize: '12px', margin: 0 },
-  itemPrice: { color: '#2196F3', fontSize: '14px', fontWeight: 700, flexShrink: 0 },
+  statIcon:  { width: '44px', height: '44px', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  statValue: { fontSize: '20px', fontWeight: 800, color: '#000' },
+  statLabel: { fontSize: '12px', color: '#777', marginTop: '2px' },
 
-  myTotalRow: {
-    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-    background: '#e3f2fd', borderRadius: '10px', padding: '12px 16px',
+  quickRow: { display: 'flex', gap: '12px', marginBottom: '28px' },
+  quickBtn: {
+    display: 'flex', alignItems: 'center', gap: '7px',
+    padding: '10px 20px', background: '#2196F3', color: '#fff',
+    border: 'none', borderRadius: '10px', fontSize: '14px', fontWeight: 600,
+    cursor: 'pointer', boxShadow: '0 4px 12px rgba(33,150,243,0.3)',
   },
-  myTotalLabel: { color: '#555', fontSize: '13px', fontWeight: 600 },
-  myTotalVal:   { color: '#1565C0', fontSize: '18px', fontWeight: 800 },
-
-  statusRow:  { display: 'flex', flexDirection: 'column', gap: '10px' },
-  statusBtns: { display: 'flex', flexWrap: 'wrap', gap: '8px' },
-  statusBtn: {
-    padding: '7px 16px', border: 'none', borderRadius: '20px',
-    fontSize: '12px', fontWeight: 700, cursor: 'pointer',
-    transition: 'all .15s',
+  quickBtnOutline: {
+    background: '#fff', color: '#2196F3',
+    border: '1.5px solid #2196F3', boxShadow: 'none',
   },
 
-  // Modal
-  overlay: {
-    position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)',
-    display: 'flex', alignItems: 'center', justifyContent: 'center',
-    zIndex: 2000, padding: '16px', backdropFilter: 'blur(3px)',
+  section:      { marginTop: '8px' },
+  sectionTitle: { color: '#000', fontSize: '16px', fontWeight: 700, margin: '0 0 14px' },
+  recentGrid:   { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: '14px' },
+  recentCard:   {
+    background: '#fff', border: '1px solid #e3f2fd',
+    borderRadius: '12px', overflow: 'hidden',
+    boxShadow: '0 2px 8px rgba(33,150,243,0.05)',
   },
-  modal: {
-    background: '#fff', borderRadius: '20px', padding: '28px',
-    width: '100%', maxWidth: '580px', maxHeight: '94vh', overflowY: 'auto',
-    boxShadow: '0 28px 70px rgba(33,150,243,0.2)',
-    animation: 'fadeIn .2s ease',
-  },
-  modalHeader: {
-    display: 'flex', justifyContent: 'space-between',
-    alignItems: 'flex-start', marginBottom: '20px',
-  },
-  modalTitle: { color: '#000', fontSize: '20px', fontWeight: 700, margin: '0 0 3px' },
-  modalSub:   { color: '#aaa', fontSize: '13px', margin: 0 },
-  closeBtn: {
-    background: '#f0f8ff', border: '1px solid #bbdefb',
-    borderRadius: '8px', color: '#555', cursor: 'pointer',
-    padding: '7px', display: 'flex', flexShrink: 0,
-  },
+  recentImg:   { width: '100%', height: '120px', objectFit: 'cover' },
+  recentInfo:  { padding: '10px 12px' },
+  recentTitle: { color: '#000', fontSize: '13px', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
+  recentPrice: { color: '#2196F3', fontSize: '13px', fontWeight: 700, marginTop: '3px' },
 
-  dropZone: {
-    border: '2px dashed #bbdefb', borderRadius: '12px', minHeight: '160px',
-    display: 'flex', alignItems: 'center', justifyContent: 'center',
-    cursor: 'pointer', overflow: 'hidden', background: '#f5fbff', transition: 'all .2s',
+  // ── Form ───────────────────────────────────────────────────
+  form:     { display: 'flex', flexDirection: 'column', gap: '16px', maxWidth: '820px' },
+  formCard: {
+    background: '#fff', border: '1px solid #e3f2fd',
+    borderRadius: '14px', padding: '20px 22px',
+    boxShadow: '0 2px 10px rgba(33,150,243,0.05)',
   },
-  dropActive:  { border: '2px dashed #2196F3', background: '#e3f2fd' },
-  dropHasImg:  { border: '2px solid #bbdefb', minHeight: '200px' },
-  dropContent: {
-    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', padding: '24px',
+  cardHead: {
+    display: 'flex', alignItems: 'center', gap: '7px',
+    color: '#2196F3', fontSize: '13px', fontWeight: 700,
+    textTransform: 'uppercase', letterSpacing: '0.5px',
+    marginBottom: '16px', paddingBottom: '10px',
+    borderBottom: '1px solid #e3f2fd',
   },
-  dropIconBox: {
-    width: '56px', height: '56px', background: '#e3f2fd', borderRadius: '50%',
-    display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '4px',
-  },
-  dropTitle: { color: '#000', fontSize: '14px', fontWeight: 600, margin: 0 },
-  dropSub:   { color: '#aaa', fontSize: '12px', margin: 0 },
-  previewWrap:    { position: 'relative', width: '100%' },
-  previewImg:     { width: '100%', maxHeight: '220px', objectFit: 'cover', display: 'block' },
-  previewOverlay: {
-    position: 'absolute', inset: 0, background: 'rgba(33,150,243,0.6)',
-    display: 'flex', flexDirection: 'column',
-    alignItems: 'center', justifyContent: 'center',
-    gap: '6px', transition: 'opacity .2s',
-  },
+  formGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' },
 
-  fieldStack: { display: 'flex', flexDirection: 'column', gap: '14px' },
-  row2:       { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' },
+  field:     { display: 'flex', flexDirection: 'column', gap: '6px' },
+  label:     { color: '#000', fontSize: '13px', fontWeight: 600 },
+  req:       { color: '#e53935' },
   input: {
-    width: '100%', background: '#fff', border: '1.5px solid #bbdefb',
-    borderRadius: '8px', color: '#000', fontSize: '14px', padding: '10px 12px',
-    outline: 'none', boxSizing: 'border-box', fontFamily: 'inherit',
+    background: '#f0f8ff', border: '1.5px solid #bbdefb',
+    borderRadius: '8px', color: '#000', fontSize: '14px',
+    padding: '10px 12px', outline: 'none', width: '100%',
+    boxSizing: 'border-box',
   },
-  select: {
-    width: '100%', background: '#fff', border: '1.5px solid #bbdefb',
-    borderRadius: '8px', color: '#000', fontSize: '14px', padding: '10px 12px',
-    outline: 'none', cursor: 'pointer',
+  charCount: { color: '#aaa', fontSize: '11px', textAlign: 'right' },
+  inputWrap: { display: 'flex' },
+  inputPre: {
+    background: '#e3f2fd', border: '1.5px solid #bbdefb', borderRight: 'none',
+    borderTopLeftRadius: '8px', borderBottomLeftRadius: '8px',
+    padding: '10px 10px', color: '#2196F3', fontWeight: 700, fontSize: '14px',
+    display: 'flex', alignItems: 'center',
   },
-  charCount:  { color: '#ccc', fontSize: '11px', textAlign: 'right', marginTop: '2px' },
-  inputIcon: {
-    display: 'flex', alignItems: 'center', gap: '10px', background: '#fff',
-    border: '1.5px solid #bbdefb', borderRadius: '8px', padding: '0 12px',
+  inputSuf: {
+    background: '#e3f2fd', border: '1.5px solid #bbdefb', borderLeft: 'none',
+    borderTopRightRadius: '8px', borderBottomRightRadius: '8px',
+    padding: '10px 10px', color: '#2196F3', fontWeight: 700, fontSize: '14px',
+    display: 'flex', alignItems: 'center',
   },
-  inputInner: {
-    flex: 1, background: 'none', border: 'none', outline: 'none',
-    color: '#000', fontSize: '14px', padding: '10px 0',
+  finalPriceBox: {
+    display: 'flex', alignItems: 'center', gap: '10px',
+    background: '#e8f5e9', border: '1px solid #a5d6a7',
+    borderRadius: '10px', padding: '12px 16px',
+    color: '#2e7d32', fontSize: '14px', fontWeight: 600,
+    flexWrap: 'wrap',
   },
-  stockHint: { fontSize: '11px', fontWeight: 600, marginTop: '3px' },
-  priceWrap:  { display: 'flex', alignItems: 'stretch' },
-  pricePfx: {
-    display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 12px',
-    background: '#e3f2fd', border: '1.5px solid #bbdefb',
-    borderRight: 'none', borderRadius: '8px 0 0 8px',
-    color: '#1565C0', fontWeight: 800, fontSize: '15px',
+  saveBadge: {
+    background: '#2e7d32', color: '#fff',
+    fontSize: '11px', fontWeight: 700,
+    padding: '2px 8px', borderRadius: '10px',
   },
-  priceInput: {
-    flex: 1, background: '#fff', border: '1.5px solid #bbdefb',
-    borderRadius: '0 8px 8px 0', color: '#000', fontSize: '14px',
-    padding: '10px 12px', outline: 'none',
+  formulaNote: { color: '#aaa', fontSize: '11px', marginTop: '4px' },
+
+  // Drop zone
+  dropZone: {
+    border: '2px dashed #bbdefb', borderRadius: '12px',
+    background: '#f0f8ff', cursor: 'pointer',
+    minHeight: '160px', display: 'flex',
+    alignItems: 'center', justifyContent: 'center',
+    transition: 'border-color .2s, background .2s',
   },
-  discountBox: {
-    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-    flexWrap: 'wrap', gap: '12px',
-    background: 'linear-gradient(135deg, #fff8e1 0%, #fffde7 100%)',
-    border: '1.5px solid #ffe082', borderRadius: '12px', padding: '14px 16px', marginTop: '12px',
+  dropZoneActive: { borderColor: '#2196F3', background: '#e3f2fd' },
+  dropContent: { textAlign: 'center', padding: '20px' },
+  dropText:    { color: '#555', fontSize: '14px', margin: '10px 0 4px', fontWeight: 500 },
+  dropHint:    { color: '#aaa', fontSize: '12px', margin: 0 },
+  previewWrap: { position: 'relative', width: '100%', maxWidth: '340px' },
+  previewImg:  { width: '100%', maxHeight: '200px', objectFit: 'cover', borderRadius: '8px', display: 'block' },
+  removeImg: {
+    position: 'absolute', top: '8px', right: '8px',
+    background: 'rgba(0,0,0,0.6)', color: '#fff',
+    border: 'none', borderRadius: '50%',
+    width: '26px', height: '26px',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    cursor: 'pointer',
   },
-  discountLeft:  { display: 'flex', alignItems: 'center', gap: '12px' },
-  discBadgeLg: {
-    background: '#e53935', color: '#fff',
-    fontSize: '14px', fontWeight: 800, padding: '6px 14px', borderRadius: '20px', flexShrink: 0,
-  },
-  discTitle: { color: '#000', fontSize: '13px', fontWeight: 700, margin: '0 0 2px' },
-  discSub:   { color: '#777', fontSize: '12px', margin: 0 },
-  discPrices: { display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' },
-  discSellPrice: { color: '#2196F3', fontSize: '18px', fontWeight: 800 },
-  discOrigPrice: { color: '#bbb', fontSize: '12px', textDecoration: 'line-through' },
-  discountTip: {
-    display: 'flex', alignItems: 'flex-start', gap: '8px',
-    background: '#fffde7', border: '1px solid #ffe082',
-    borderRadius: '8px', padding: '10px 14px', marginTop: '12px',
-    color: '#777', fontSize: '12px', lineHeight: '1.6',
+
+  formActions: { display: 'flex', gap: '12px', justifyContent: 'flex-end', paddingTop: '4px' },
+  cancelBtn: {
+    padding: '11px 24px', background: '#fff',
+    border: '1.5px solid #e0e0e0', borderRadius: '10px',
+    color: '#555', fontSize: '14px', fontWeight: 600, cursor: 'pointer',
   },
   saveBtn: {
-    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '9px',
-    width: '100%', marginTop: '8px', padding: '15px',
-    background: 'linear-gradient(135deg, #2196F3 0%, #1565C0 100%)',
-    color: '#fff', border: 'none', borderRadius: '12px',
-    fontSize: '16px', fontWeight: 700, cursor: 'pointer',
-    boxShadow: '0 4px 18px rgba(33,150,243,0.4)',
+    padding: '11px 28px', background: '#2196F3', color: '#fff',
+    border: 'none', borderRadius: '10px',
+    fontSize: '14px', fontWeight: 700, cursor: 'pointer',
+    boxShadow: '0 4px 12px rgba(33,150,243,0.35)',
   },
-  btnSpinner: {
-    width: '18px', height: '18px',
-    border: '2px solid rgba(255,255,255,0.3)', borderTop: '2px solid #fff',
-    borderRadius: '50%', animation: 'spin 0.7s linear infinite',
-  },
-}
 
-const pc = {
-  card: {
-    background: '#fff', border: '1.5px solid #e3f2fd', borderRadius: '14px',
-    overflow: 'hidden', boxShadow: '0 2px 10px rgba(33,150,243,0.06)',
+  // ── Products grid ──────────────────────────────────────────
+  addBtn: {
+    display: 'flex', alignItems: 'center', gap: '6px',
+    padding: '10px 18px', background: '#2196F3', color: '#fff',
+    border: 'none', borderRadius: '10px', fontSize: '14px',
+    fontWeight: 600, cursor: 'pointer', flexShrink: 0,
+    boxShadow: '0 4px 12px rgba(33,150,243,0.3)',
+  },
+  productGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))',
+    gap: '18px',
+  },
+  productCard: {
+    background: '#fff', border: '1px solid #e3f2fd',
+    borderRadius: '14px', overflow: 'hidden',
+    boxShadow: '0 2px 12px rgba(33,150,243,0.07)',
     display: 'flex', flexDirection: 'column',
   },
-  imgBox: { position: 'relative', paddingTop: '62%', background: '#f0f8ff', overflow: 'hidden' },
-  img: { position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' },
+  productImgWrap: { position: 'relative', height: '180px', background: '#f0f8ff' },
+  productImg:     { width: '100%', height: '100%', objectFit: 'cover' },
   discBadge: {
     position: 'absolute', top: '8px', left: '8px',
-    background: '#e53935', color: '#fff', fontSize: '11px', fontWeight: 800,
-    padding: '3px 9px', borderRadius: '20px',
+    background: '#ef4444', color: '#fff',
+    fontSize: '11px', fontWeight: 700,
+    padding: '2px 8px', borderRadius: '6px',
   },
-  catBadge: {
+  outBadge: {
     position: 'absolute', top: '8px', right: '8px',
-    background: 'rgba(33,150,243,0.9)', color: '#fff', fontSize: '10px', fontWeight: 600,
-    padding: '3px 8px', borderRadius: '20px',
+    background: 'rgba(0,0,0,0.6)', color: '#fff',
+    fontSize: '11px', fontWeight: 600,
+    padding: '2px 8px', borderRadius: '6px',
   },
-  body: { padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: '7px', flex: 1 },
-  title: { color: '#000', fontSize: '14px', fontWeight: 700, margin: 0, lineHeight: '1.4' },
-  brand: { color: '#90caf9', fontSize: '11px', fontWeight: 600, margin: 0, textTransform: 'uppercase', letterSpacing: '0.5px' },
-  desc:  { color: '#888', fontSize: '12px', margin: 0, lineHeight: '1.5', flex: 1 },
-  priceRow: { display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' },
-  price:    { color: '#2196F3', fontSize: '18px', fontWeight: 800 },
-  origPrice:{ color: '#bbb', fontSize: '12px', textDecoration: 'line-through' },
-  savePill: {
-    background: '#fff3e0', color: '#e65100', border: '1px solid #ffcc80',
-    fontSize: '10px', fontWeight: 700, padding: '2px 7px', borderRadius: '20px',
-  },
-  stockRow:  { display: 'flex', alignItems: 'center', gap: '6px' },
-  stockDot:  { width: '7px', height: '7px', borderRadius: '50%', flexShrink: 0 },
-  stockLabel:{ fontSize: '12px', fontWeight: 600 },
-  actions:   { display: 'flex', gap: '8px', marginTop: '4px' },
+  productBody:    { padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: '6px', flex: 1 },
+  productCat:     { color: '#2196F3', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px' },
+  productTitle:   { color: '#000', fontSize: '14px', fontWeight: 700, lineHeight: '1.3' },
+  productDesc:    { color: '#777', fontSize: '12px', lineHeight: '1.5', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' },
+  productPricing: { display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px' },
+  productPrice:   { color: '#2196F3', fontSize: '17px', fontWeight: 800 },
+  productOrig:    { color: '#bbb', fontSize: '13px', textDecoration: 'line-through' },
+  productMeta:    { marginTop: 'auto' },
+  stockText:      { color: '#888', fontSize: '12px' },
+  productBtns:    { display: 'flex', gap: '8px', marginTop: '10px' },
   editBtn: {
-    flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '5px',
-    padding: '9px', background: '#e3f2fd', border: '1px solid #bbdefb',
-    borderRadius: '8px', color: '#1565C0', fontSize: '13px', fontWeight: 600, cursor: 'pointer',
+    display: 'flex', alignItems: 'center', gap: '5px', flex: 1,
+    justifyContent: 'center', padding: '8px',
+    background: '#e3f2fd', border: '1px solid #90caf9',
+    borderRadius: '8px', color: '#2196F3',
+    fontSize: '13px', fontWeight: 600, cursor: 'pointer',
   },
-  delBtn: {
-    flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '5px',
-    padding: '9px', background: '#fff0f0', border: '1px solid #fecaca',
-    borderRadius: '8px', color: '#e53935', fontSize: '13px', fontWeight: 600, cursor: 'pointer',
+  deleteBtn: {
+    display: 'flex', alignItems: 'center', gap: '5px', flex: 1,
+    justifyContent: 'center', padding: '8px',
+    background: '#ffebee', border: '1px solid #ffcdd2',
+    borderRadius: '8px', color: '#e53935',
+    fontSize: '13px', fontWeight: 600, cursor: 'pointer',
   },
-}
 
-const fs = {
-  wrap: { border: '1.5px solid #e3f2fd', borderRadius: '14px', overflow: 'hidden', marginBottom: '16px' },
-  header: {
-    display: 'flex', alignItems: 'center', gap: '8px',
-    background: '#f5fbff', borderBottom: '1.5px solid #e3f2fd', padding: '12px 16px',
+  // ── Orders ────────────────────────────────────────────────
+  orderCard: {
+    background: '#fff', border: '1px solid #e3f2fd',
+    borderRadius: '14px', overflow: 'hidden',
+    boxShadow: '0 2px 10px rgba(33,150,243,0.05)',
   },
-  stepBadge: {
-    width: '22px', height: '22px', borderRadius: '50%', background: '#2196F3', color: '#fff',
-    fontSize: '12px', fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+  orderHead: {
+    display: 'flex', alignItems: 'center', gap: '16px',
+    padding: '16px 20px', cursor: 'pointer',
   },
-  title: { color: '#000', fontSize: '13px', fontWeight: 700, flex: 1 },
-  req:   { color: '#e53935', fontSize: '11px', fontWeight: 600 },
-  body:  { padding: '18px 16px' },
+  orderLeft:   { minWidth: '90px' },
+  orderId:     { color: '#000', fontSize: '13px', fontWeight: 700 },
+  orderDate:   { color: '#aaa', fontSize: '12px', marginTop: '2px' },
+  orderMid:    { flex: 1, minWidth: 0 },
+  buyerName:   { color: '#000', fontSize: '14px', fontWeight: 600 },
+  buyerEmail:  { color: '#888', fontSize: '12px', marginTop: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  orderRight:  { display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' },
+  statusBadge: { fontSize: '12px', fontWeight: 700, padding: '3px 10px', borderRadius: '10px', textTransform: 'capitalize' },
+  orderEarn:   { color: '#2196F3', fontSize: '15px', fontWeight: 800 },
+  orderBody:   { padding: '0 20px 18px', borderTop: '1px solid #f0f8ff' },
+  orderItems:  { display: 'flex', flexDirection: 'column', gap: '10px', paddingTop: '14px', marginBottom: '14px' },
+  orderItem:   { display: 'flex', alignItems: 'center', gap: '12px', padding: '10px', background: '#f8fbff', borderRadius: '10px' },
+  orderItemImg: { width: '50px', height: '50px', objectFit: 'cover', borderRadius: '8px', flexShrink: 0 },
+  orderItemTitle: { color: '#000', fontSize: '13px', fontWeight: 600 },
+  orderItemMeta:  { color: '#888', fontSize: '12px', marginTop: '2px' },
+  orderItemTotal: { color: '#2196F3', fontSize: '14px', fontWeight: 700, flexShrink: 0 },
+  statusRow:   { display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', paddingTop: '10px', borderTop: '1px solid #e3f2fd' },
+  statusLabel: { color: '#777', fontSize: '12px', fontWeight: 600 },
+  stBtn: {
+    padding: '5px 12px', borderRadius: '8px',
+    fontSize: '12px', fontWeight: 600, cursor: 'pointer',
+    textTransform: 'capitalize',
+  },
+
+  // Empty state
+  empty: {
+    textAlign: 'center', padding: '60px 24px',
+    background: '#fff', borderRadius: '16px',
+    border: '1px solid #e3f2fd',
+  },
 }
 
 export default SellerDashboard

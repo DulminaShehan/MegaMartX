@@ -10,11 +10,11 @@ import { Navigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 
 const ProtectedRoute = ({ children, role }) => {
-  const { currentUser, userProfile, loading } = useAuth()
+  const { currentUser, userProfile, loading, profileLoading } = useAuth()
   const location = useLocation()
 
-  // Still loading Firebase auth state — show nothing
-  if (loading) return null
+  // Auth state or profile still loading — wait before making any decision
+  if (loading || profileLoading) return null
 
   // Not logged in → redirect to login, remember where they were going
   if (!currentUser) {

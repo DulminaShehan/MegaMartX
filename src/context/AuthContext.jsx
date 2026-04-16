@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState } from 'react'
+import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
@@ -14,18 +14,26 @@ const AuthContext = createContext(null)
 export const useAuth = () => useContext(AuthContext)
 
 export const AuthProvider = ({ children }) => {
-  const [currentUser, setCurrentUser] = useState(null)
-  const [userProfile, setUserProfile] = useState(null)
-  const [loading, setLoading] = useState(true)
+  const [currentUser, setCurrentUser]       = useState(null)
+  const [userProfile, setUserProfile]       = useState(null)
+  const [loading, setLoading]               = useState(true)
+  const [profileLoading, setProfileLoading] = useState(true)
+
+  // Prevents onAuthStateChanged from auto-creating a 'user' profile
+  // during registration (race condition: auth fires before profile is saved)
+  const isRegistering = useRef(false)
 
   const register = async (email, password, name, role = 'user', extraData = {}) => {
-    const cred = await createUserWithEmailAndPassword(auth, email, password)
-    await updateProfile(cred.user, { displayName: name })
-
-    const profileData = { name, email, role, photoURL: '', ...extraData }
-
-    await createUserProfile(cred.user.uid, profileData)
-    return cred
+    isRegistering.current = true
+    try {
+      const cred = await createUserWithEmailAndPassword(auth, email, password)
+      await updateProfile(cred.user, { displayName: name })
+      const profileData = { name, email, role, photoURL: '', ...extraData }
+      await createUserProfile(cred.user.uid, profileData)
+      return cred
+    } finally {
+      isRegistering.current = false
+    }
   }
 
   const login = (email, password) =>
@@ -36,9 +44,9 @@ export const AuthProvider = ({ children }) => {
     const existing = await getUserProfile(cred.user.uid)
     if (!existing) {
       const profileData = {
-        name: cred.user.displayName,
-        email: cred.user.email,
-        role: 'user',
+        name:     cred.user.displayName || cred.user.email,
+        email:    cred.user.email,
+        role:     'user',
         photoURL: cred.user.photoURL || '',
       }
       await createUserProfile(cred.user.uid, profileData)
@@ -51,36 +59,44 @@ export const AuthProvider = ({ children }) => {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setCurrentUser(user)
+      setProfileLoading(true)
       if (user) {
         try {
-          // Firestore may not exist yet — catch and continue
-          const profile = await getUserProfile(user.uid)
+          let profile = await getUserProfile(user.uid)
+
+          // Returning user whose profile doesn't exist in MySQL yet — auto-create.
+          // Skip during active registration to avoid overwriting the seller/admin role.
+          if (!profile && !isRegistering.current) {
+            const profileData = {
+              name:     user.displayName || user.email,
+              email:    user.email,
+              role:     'user',
+              photoURL: user.photoURL || '',
+            }
+            profile = await createUserProfile(user.uid, profileData)
+          }
+
           setUserProfile(profile)
         } catch (err) {
-          console.warn('Could not load user profile (Firestore may not be set up yet):', err.message)
+          console.warn('Could not load user profile:', err.message)
           setUserProfile(null)
         }
       } else {
         setUserProfile(null)
       }
-      // Always unblock the app regardless of Firestore errors
       setLoading(false)
+      setProfileLoading(false)
     })
 
-    // Safety net: unblock after 5 seconds even if Firebase never responds
     const timeout = setTimeout(() => setLoading(false), 5000)
-
-    return () => {
-      unsubscribe()
-      clearTimeout(timeout)
-    }
+    return () => { unsubscribe(); clearTimeout(timeout) }
   }, [])
 
   const isAdmin  = userProfile?.role === 'admin'
   const isSeller = userProfile?.role === 'seller' || isAdmin
 
   const value = {
-    currentUser, userProfile, loading,
+    currentUser, userProfile, loading, profileLoading,
     isAdmin, isSeller, isUser: !!currentUser,
     register, login, loginWithGoogle, logout,
     refreshProfile: async () => {
@@ -93,7 +109,6 @@ export const AuthProvider = ({ children }) => {
     },
   }
 
-  // Always render children — never block on loading
   return (
     <AuthContext.Provider value={value}>
       {children}

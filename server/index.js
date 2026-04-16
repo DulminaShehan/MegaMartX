@@ -8,6 +8,8 @@ const cors     = require('cors')
 const mysql    = require('mysql2/promise')
 const { v4: uuidv4 } = require('uuid')
 const path     = require('path')
+const fs       = require('fs')
+const multer   = require('multer')
 require('dotenv').config({ path: path.resolve(__dirname, '../.env') })
 
 const app  = express()
@@ -15,6 +17,37 @@ const PORT = process.env.API_PORT || 5000
 
 app.use(cors({ origin: '*' }))
 app.use(express.json())
+
+// ── Multer — local image storage ──────────────────────────────
+const uploadsDir = path.join(__dirname, 'uploads')
+if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true })
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, uploadsDir),
+  filename:    (req, file, cb) => {
+    const ext  = path.extname(file.originalname).toLowerCase()
+    const name = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}${ext}`
+    cb(null, name)
+  },
+})
+const upload = multer({
+  storage,
+  limits: { fileSize: 5 * 1024 * 1024 },          // 5 MB max
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype.startsWith('image/')) cb(null, true)
+    else cb(new Error('Only image files are allowed'))
+  },
+})
+
+// Serve uploaded images as static files
+app.use('/uploads', express.static(uploadsDir))
+
+// POST /api/upload — upload a single product image
+app.post('/api/upload', upload.single('image'), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' })
+  const url = `http://localhost:${PORT}/uploads/${req.file.filename}`
+  res.json({ url, filename: req.file.filename })
+})
 
 const DB_NAME = process.env.DB_NAME || 'megamartx'
 const DB_CONFIG = {
