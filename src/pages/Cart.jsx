@@ -2,47 +2,30 @@
 // Cart Page — white + blue theme
 // ============================================================
 
-import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { FiShoppingBag, FiArrowLeft, FiTrash2 } from 'react-icons/fi'
+import { FiShoppingBag, FiArrowLeft, FiTrash2, FiArrowRight } from 'react-icons/fi'
 import CartItem from '../components/CartItem'
 import { useCart } from '../context/CartContext'
 import { useAuth } from '../context/AuthContext'
-import { placeOrder } from '../firebase/firestore'
 import { formatPrice } from '../utils/helpers'
 import toast from 'react-hot-toast'
 
 const Cart = () => {
   const { cartItems, cartTotal, clearCart } = useCart()
-  const { currentUser, userProfile } = useAuth()
+  const { currentUser } = useAuth()
   const navigate = useNavigate()
-  const [placing, setPlacing] = useState(false)
 
   const shipping = cartTotal > 50 ? 0 : 4.99
   const tax = +(cartTotal * 0.08).toFixed(2)
   const grand = +(cartTotal + shipping + tax).toFixed(2)
 
-  const handleCheckout = async () => {
-    if (!currentUser) { toast.error('Please login to place an order'); navigate('/login'); return }
-    setPlacing(true)
-    try {
-      await placeOrder({
-        userId: currentUser.uid,
-        userName: userProfile?.name || currentUser.displayName || 'Customer',
-        userEmail: currentUser.email,
-        items: cartItems.map(i => ({
-          id: i.id, title: i.title, price: i.price,
-          quantity: i.quantity, imageUrl: i.imageUrl || '',
-          sellerUid: i.sellerUid || '', sellerName: i.sellerName || '',
-        })),
-        sellerUids: [...new Set(cartItems.map(i => i.sellerUid).filter(Boolean))],
-        subtotal: cartTotal, shipping, tax, total: grand,
-      })
-      clearCart()
-      toast.success('Order placed! 🎉')
-      navigate('/orders')
-    } catch { toast.error('Failed to place order. Please try again.') }
-    finally { setPlacing(false) }
+  const handleCheckout = () => {
+    if (!currentUser) {
+      toast.error('Please login to continue')
+      navigate('/login', { state: { from: { pathname: '/checkout' } } })
+      return
+    }
+    navigate('/checkout')
   }
 
   if (cartItems.length === 0) return (
@@ -107,11 +90,10 @@ const Cart = () => {
             </div>
 
             <button
-              style={{ ...s.checkoutBtn, opacity: placing ? 0.75 : 1 }}
+              style={s.checkoutBtn}
               onClick={handleCheckout}
-              disabled={placing}
             >
-              {placing ? 'Placing Order…' : '🛒  Place Order'}
+              Proceed to Checkout <FiArrowRight size={15} style={{ verticalAlign: 'middle' }} />
             </button>
 
             <p style={s.secure}>🔒 Secure checkout — SSL encrypted</p>

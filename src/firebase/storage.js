@@ -1,31 +1,19 @@
 // ============================================================
-// Firebase Storage helpers for image uploads
+// storage.js — Firebase Storage removed.
+// Image upload now uses multer (POST /api/upload on the server).
+// deleteProductImage is a no-op: the server cleans up old images
+// when a product is updated or deleted.
 // ============================================================
 
-import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage'
-import { storage } from './config'
-import { v4 as uuidv4 } from 'uuid'
-
 /**
- * Upload a product image to Firebase Storage.
- * Returns the public download URL.
+ * No longer used — image upload goes through SellerDashboard
+ * via axios POST /api/upload (multer).
  */
-export const uploadProductImage = async (file, sellerUid) => {
-  // Unique filename: products/<sellerUid>/<uuid>.<ext>
-  const ext = file.name.split('.').pop()
-  const filename = `products/${sellerUid}/${uuidv4()}.${ext}`
-  const storageRef = ref(storage, filename)
-
-  const snapshot = await uploadBytes(storageRef, file)
-  const url = await getDownloadURL(snapshot.ref)
-  return { url, path: filename }
+export const uploadProductImage = async () => {
+  throw new Error('Use the /api/upload endpoint (multer) for image uploads.')
 }
 
 /**
- * Delete an image from Firebase Storage by its path.
+ * No-op — the server handles file cleanup.
  */
-export const deleteProductImage = async (path) => {
-  if (!path) return
-  const storageRef = ref(storage, path)
-  await deleteObject(storageRef)
-}
+export const deleteProductImage = async () => {}

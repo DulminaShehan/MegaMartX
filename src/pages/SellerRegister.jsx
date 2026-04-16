@@ -1,33 +1,33 @@
 // ============================================================
-// Seller Register Page — seller account creation with store info
+// Seller Register — JWT auth (no Firebase)
 // ============================================================
 
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import {
-  FiUser, FiMail, FiLock, FiEye, FiEyeOff, FiCheck,
-  FiPhone, FiShoppingBag,
+  FiUser, FiMail, FiLock, FiEye, FiEyeOff,
+  FiCheck, FiPhone, FiShoppingBag,
 } from 'react-icons/fi'
 import { useAuth } from '../context/AuthContext'
 import toast from 'react-hot-toast'
 
 const SellerRegister = () => {
-  const { register, refreshProfile } = useAuth()
-  const navigate = useNavigate()
-  const [form, setForm] = useState({
-    name: '', storeName: '', email: '', phone: '',
-    password: '', confirm: '',
-  })
-  const [showPass, setShowPass]       = useState(false)
-  const [showConfirm, setShowConfirm] = useState(false)
-  const [loading, setLoading]         = useState(false)
+  const { register } = useAuth()
+  const navigate     = useNavigate()
 
-  const handleChange = e => setForm(f => ({ ...f, [e.target.name]: e.target.value }))
+  const [form, setForm] = useState({
+    name: '', storeName: '', email: '', phone: '', password: '', confirm: '',
+  })
+  const [showPass,    setShowPass]    = useState(false)
+  const [showConfirm, setShowConfirm] = useState(false)
+  const [loading,     setLoading]     = useState(false)
+
+  const handleChange = (e) => setForm(f => ({ ...f, [e.target.name]: e.target.value }))
 
   const checks = [
     { label: 'At least 6 characters', ok: form.password.length >= 6 },
     { label: 'Contains a number',     ok: /\d/.test(form.password) },
-    { label: 'Passwords match',       ok: form.password && form.password === form.confirm },
+    { label: 'Passwords match',       ok: !!form.password && form.password === form.confirm },
   ]
 
   const handleSubmit = async (e) => {
@@ -41,20 +41,16 @@ const SellerRegister = () => {
 
     setLoading(true)
     try {
-      // Single register call — writes role:'seller' + storeName in one Firestore write
       await register(email, password, name, 'seller', {
         storeName,
         phone: form.phone,
       })
-      // Force-refresh the profile in context so ProtectedRoute sees role:'seller'
-      await refreshProfile()
       toast.success('Seller account created! Welcome to MegaMartX 🎉')
       navigate('/seller')
     } catch (err) {
       toast.error(
         err.code === 'auth/email-already-in-use' ? 'This email is already registered'
-        : err.code === 'auth/invalid-email'      ? 'Invalid email address'
-        : 'Registration failed. Please try again.'
+        : err.message || 'Registration failed. Please try again.'
       )
     } finally { setLoading(false) }
   }
@@ -62,14 +58,10 @@ const SellerRegister = () => {
   return (
     <div style={s.page}>
       <div style={s.card}>
-
-        {/* Logo */}
         <Link to="/" style={s.logo}>Mega<span style={s.blue}>Mart</span>X</Link>
 
-        {/* Badge */}
         <div style={s.sellerBadge}>
-          <FiShoppingBag size={15} />
-          Seller Account
+          <FiShoppingBag size={15} /> Seller Account
         </div>
 
         <h1 style={s.heading}>Start Selling Today</h1>
@@ -77,7 +69,6 @@ const SellerRegister = () => {
 
         <form onSubmit={handleSubmit} style={s.form}>
 
-          {/* Full Name */}
           <div style={s.field}>
             <label style={s.label}>Full Name <span style={s.req}>*</span></label>
             <div style={s.inputWrap}>
@@ -87,7 +78,6 @@ const SellerRegister = () => {
             </div>
           </div>
 
-          {/* Store Name */}
           <div style={s.field}>
             <label style={s.label}>Store / Business Name <span style={s.req}>*</span></label>
             <div style={s.inputWrap}>
@@ -97,7 +87,6 @@ const SellerRegister = () => {
             </div>
           </div>
 
-          {/* Email */}
           <div style={s.field}>
             <label style={s.label}>Email Address <span style={s.req}>*</span></label>
             <div style={s.inputWrap}>
@@ -107,7 +96,6 @@ const SellerRegister = () => {
             </div>
           </div>
 
-          {/* Phone */}
           <div style={s.field}>
             <label style={s.label}>Phone Number <span style={s.opt}>(optional)</span></label>
             <div style={s.inputWrap}>
@@ -117,7 +105,6 @@ const SellerRegister = () => {
             </div>
           </div>
 
-          {/* Password */}
           <div style={s.field}>
             <label style={s.label}>Password <span style={s.req}>*</span></label>
             <div style={s.inputWrap}>
@@ -130,7 +117,6 @@ const SellerRegister = () => {
             </div>
           </div>
 
-          {/* Confirm Password */}
           <div style={s.field}>
             <label style={s.label}>Confirm Password <span style={s.req}>*</span></label>
             <div style={s.inputWrap}>
@@ -143,7 +129,6 @@ const SellerRegister = () => {
             </div>
           </div>
 
-          {/* Password checklist */}
           {form.password && (
             <div style={s.checkList}>
               {checks.map(({ label, ok }) => (
@@ -184,12 +169,10 @@ const s = {
   page: {
     minHeight: '100vh',
     background: 'linear-gradient(135deg, #e8f5e9 0%, #ffffff 60%)',
-    display: 'flex', alignItems: 'center', justifyContent: 'center',
-    padding: '24px',
+    display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px',
   },
   card: {
-    background: '#fff',
-    border: '1px solid #c8e6c9',
+    background: '#fff', border: '1px solid #c8e6c9',
     borderRadius: '20px', padding: '40px 36px',
     width: '100%', maxWidth: '440px',
     boxShadow: '0 20px 60px rgba(33,150,243,0.10)',
@@ -197,11 +180,9 @@ const s = {
   },
   logo: {
     textAlign: 'center', fontSize: '24px',
-    fontWeight: 800, color: '#000',
-    textDecoration: 'none', display: 'block',
+    fontWeight: 800, color: '#000', textDecoration: 'none', display: 'block',
   },
   blue: { color: '#2196F3' },
-
   sellerBadge: {
     display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '7px',
     background: '#e8f5e9', border: '1px solid #a5d6a7',
@@ -209,7 +190,6 @@ const s = {
     fontSize: '13px', fontWeight: 700,
     padding: '6px 16px', alignSelf: 'center',
   },
-
   heading: { color: '#000', fontSize: '22px', fontWeight: 700, margin: 0, textAlign: 'center' },
   sub:     { color: '#777', fontSize: '13px', textAlign: 'center', margin: 0 },
 
@@ -218,7 +198,6 @@ const s = {
   label: { color: '#000', fontSize: '13px', fontWeight: 600 },
   req:   { color: '#e53935' },
   opt:   { color: '#aaa', fontWeight: 400 },
-
   inputWrap: {
     display: 'flex', alignItems: 'center', gap: '10px',
     background: '#f0f8ff', border: '1.5px solid #bbdefb',
@@ -232,7 +211,6 @@ const s = {
     background: 'none', border: 'none', color: '#aaa',
     cursor: 'pointer', display: 'flex', padding: 0, flexShrink: 0,
   },
-
   checkList: {
     display: 'flex', flexDirection: 'column', gap: '6px',
     background: '#f0f8ff', borderRadius: '10px', padding: '12px 14px',
@@ -244,24 +222,19 @@ const s = {
     flexShrink: 0, transition: 'background .2s',
   },
   checkLabel: { fontSize: '12px', transition: 'color .2s' },
-
   submitBtn: {
     padding: '13px',
     background: 'linear-gradient(135deg, #2196F3 0%, #1565C0 100%)',
     color: '#fff', border: 'none', borderRadius: '10px',
     fontSize: '15px', fontWeight: 700, cursor: 'pointer',
-    boxShadow: '0 4px 14px rgba(33,150,243,0.35)',
-    marginTop: '2px',
+    boxShadow: '0 4px 14px rgba(33,150,243,0.35)', marginTop: '2px',
   },
-
   footer:  { color: '#777', fontSize: '13px', textAlign: 'center', margin: 0 },
   link:    { color: '#2196F3', fontWeight: 600, textDecoration: 'none' },
-
   buyerNote: {
     background: '#f0f8ff', border: '1px solid #bbdefb',
     borderRadius: '10px', padding: '12px 14px',
-    color: '#777', fontSize: '12px', textAlign: 'center',
-    lineHeight: '1.6',
+    color: '#777', fontSize: '12px', textAlign: 'center', lineHeight: '1.6',
   },
 }
 

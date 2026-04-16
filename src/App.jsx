@@ -17,9 +17,12 @@ import Register       from './pages/Register'
 import SellerRegister from './pages/SellerRegister'
 import SellerDashboard from './pages/SellerDashboard'
 import AdminPanel     from './pages/AdminPanel'
-import OrderHistory   from './pages/OrderHistory'
-import About          from './pages/About'
-import Contact        from './pages/Contact'
+import OrderHistory      from './pages/OrderHistory'
+import OrderDetails      from './pages/OrderDetails'
+import Checkout          from './pages/Checkout'
+import OrderConfirmation from './pages/OrderConfirmation'
+import About             from './pages/About'
+import Contact           from './pages/Contact'
 
 // ── Error boundary catches any render crash ──────────────────
 class ErrorBoundary extends Component {
@@ -32,12 +35,11 @@ class ErrorBoundary extends Component {
           <div style={{ fontSize:'48px', marginBottom:'16px' }}>⚠️</div>
           <h2 style={{ color:'#000', fontWeight:700, marginBottom:'10px' }}>Something went wrong</h2>
           <p style={{ color:'#555', marginBottom:'8px', maxWidth:'480px' }}>
-            Firebase may not be set up yet. Make sure you have:
+            The app encountered an unexpected error. Make sure:
           </p>
           <ul style={{ color:'#555', textAlign:'left', marginBottom:'20px', lineHeight:'2' }}>
-            <li>✅ Enabled <strong>Email/Password</strong> in Firebase Authentication</li>
-            <li>✅ Created a <strong>Firestore Database</strong> (test mode)</li>
-            <li>✅ Correct values in your <strong>.env</strong> file</li>
+            <li>✅ MySQL is running and the <strong>server</strong> is started (<code>cd server && node index.js</code>)</li>
+            <li>✅ <strong>DB_PASS</strong> and <strong>JWT_SECRET</strong> are set in your <strong>.env</strong> file</li>
             <li>✅ Restarted <strong>npm run dev</strong> after editing .env</li>
           </ul>
           <details style={{ color:'#e53935', fontSize:'12px', maxWidth:'600px', wordBreak:'break-all' }}>
@@ -107,7 +109,10 @@ const App = () => (
                 <Route path="/contact"     element={<Contact />} />
 
                 {/* Logged-in users */}
-                <Route path="/orders" element={<ProtectedRoute><OrderHistory /></ProtectedRoute>} />
+                <Route path="/checkout"                 element={<ProtectedRoute><Checkout /></ProtectedRoute>} />
+                <Route path="/order-confirmation/:id"   element={<ProtectedRoute><OrderConfirmation /></ProtectedRoute>} />
+                <Route path="/orders"                   element={<ProtectedRoute><OrderHistory /></ProtectedRoute>} />
+                <Route path="/orders/:id"               element={<ProtectedRoute><OrderDetails /></ProtectedRoute>} />
 
                 {/* Sellers */}
                 <Route path="/seller" element={<ProtectedRoute role="seller"><SellerDashboard /></ProtectedRoute>} />

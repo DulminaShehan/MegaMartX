@@ -4,7 +4,7 @@
 
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
-import { FiPackage, FiChevronDown, FiChevronUp } from 'react-icons/fi'
+import { FiPackage, FiChevronDown, FiChevronUp, FiEye } from 'react-icons/fi'
 import { getUserOrders } from '../firebase/firestore'
 import { useAuth } from '../context/AuthContext'
 import { formatPrice, formatDate, STATUS_COLORS, imgFallback } from '../utils/helpers'
@@ -57,6 +57,14 @@ const OrderHistory = () => {
                     {order.status ? order.status.charAt(0).toUpperCase() + order.status.slice(1) : 'Pending'}
                   </span>
                   <span style={s.orderTotal}>{formatPrice(order.total)}</span>
+                  <Link
+                    to={`/orders/${order.id}`}
+                    style={s.viewBtn}
+                    onClick={e => e.stopPropagation()}
+                    title="View full details"
+                  >
+                    <FiEye size={13} /> Details
+                  </Link>
                   {expanded === order.id ? <FiChevronUp size={15} color="#aaa" /> : <FiChevronDown size={15} color="#aaa" />}
                 </div>
               </div>
@@ -112,6 +120,12 @@ const s = {
   cardRight: { display:'flex', alignItems:'center', gap:'12px', flexWrap:'wrap' },
   statusBadge: { fontSize:'12px', fontWeight:600, padding:'4px 12px', borderRadius:'20px' },
   orderTotal: { color:'#000', fontSize:'15px', fontWeight:700 },
+  viewBtn: {
+    display:'inline-flex', alignItems:'center', gap:'4px',
+    color:'#2196F3', fontSize:'12px', fontWeight:600,
+    padding:'4px 10px', borderRadius:'8px',
+    background:'#e3f2fd', border:'1px solid #bbdefb',
+  },
   details: { borderTop:'1px solid #e3f2fd', padding:'16px 20px' },
   items: { display:'flex', flexDirection:'column', gap:'10px', marginBottom:'14px' },
   itemRow: { display:'flex', alignItems:'center', gap:'12px', padding:'10px', background:'#f0f8ff', border:'1px solid #e3f2fd', borderRadius:'10px' },

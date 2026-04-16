@@ -1,78 +1,59 @@
 // ============================================================
-// Register Page — simple user registration (no role selector)
+// Register Page — JWT auth (no Firebase, no Google)
 // ============================================================
 
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { FiUser, FiMail, FiLock, FiEye, FiEyeOff, FiCheck } from 'react-icons/fi'
-import { FcGoogle } from 'react-icons/fc'
 import { useAuth } from '../context/AuthContext'
 import toast from 'react-hot-toast'
 
 const Register = () => {
-  const { register, loginWithGoogle } = useAuth()
-  const navigate = useNavigate()
+  const { register } = useAuth()
+  const navigate     = useNavigate()
+
   const [form, setForm] = useState({ name: '', email: '', password: '', confirm: '' })
-  const [showPass, setShowPass]     = useState(false)
+  const [showPass,    setShowPass]    = useState(false)
   const [showConfirm, setShowConfirm] = useState(false)
-  const [loading, setLoading]       = useState(false)
+  const [loading,     setLoading]     = useState(false)
 
-  const handleChange = e => setForm(f => ({ ...f, [e.target.name]: e.target.value }))
+  const handleChange = (e) => setForm(f => ({ ...f, [e.target.name]: e.target.value }))
 
-  // Password strength checks
   const checks = [
     { label: 'At least 6 characters', ok: form.password.length >= 6 },
     { label: 'Contains a number',     ok: /\d/.test(form.password) },
-    { label: 'Passwords match',       ok: form.password && form.password === form.confirm },
+    { label: 'Passwords match',       ok: !!form.password && form.password === form.confirm },
   ]
 
   const handleSubmit = async (e) => {
     e.preventDefault()
     const { name, email, password, confirm } = form
     if (!name || !email || !password || !confirm) { toast.error('Please fill in all fields'); return }
-    if (password.length < 6)    { toast.error('Password must be at least 6 characters'); return }
-    if (password !== confirm)   { toast.error('Passwords do not match'); return }
+    if (password.length < 6)  { toast.error('Password must be at least 6 characters'); return }
+    if (password !== confirm)  { toast.error('Passwords do not match'); return }
+
     setLoading(true)
     try {
-      await register(email, password, name)
+      await register(email, password, name, 'user')
       toast.success('Account created! Welcome to MegaMartX 🎉')
       navigate('/')
     } catch (err) {
       toast.error(
         err.code === 'auth/email-already-in-use' ? 'This email is already registered'
-        : err.code === 'auth/invalid-email'      ? 'Invalid email address'
-        : 'Registration failed. Please try again.'
+        : err.message || 'Registration failed. Please try again.'
       )
     } finally { setLoading(false) }
-  }
-
-  const handleGoogle = async () => {
-    try { await loginWithGoogle(); toast.success('Welcome to MegaMartX! 🎉'); navigate('/') }
-    catch { toast.error('Google sign-up failed. Try again.') }
   }
 
   return (
     <div style={s.page}>
       <div style={s.card}>
-
-        {/* Logo */}
         <Link to="/" style={s.logo}>Mega<span style={s.blue}>Mart</span>X</Link>
         <div style={s.buyerBadge}>Buyer Account</div>
         <h1 style={s.heading}>Create Buyer Account</h1>
         <p style={s.sub}>Join thousands of shoppers on MegaMartX</p>
 
-        {/* Google */}
-        <button style={s.googleBtn} onClick={handleGoogle} type="button">
-          <FcGoogle size={20} />
-          Continue with Google
-        </button>
-
-        <div style={s.divider}>
-          <div style={s.line} /><span style={s.orText}>or sign up with email</span><div style={s.line} />
-        </div>
-
         <form onSubmit={handleSubmit} style={s.form}>
-
           {/* Full Name */}
           <div style={s.field}>
             <label style={s.label}>Full Name</label>
@@ -147,7 +128,6 @@ const Register = () => {
           <Link to="/login" style={s.link}>Sign in here</Link>
         </p>
 
-        {/* Seller note */}
         <div style={s.sellerNote}>
           Want to sell on MegaMartX?{' '}
           <Link to="/seller-register" style={s.link}>Create a Seller Account</Link> instead.
@@ -161,8 +141,7 @@ const s = {
   page: {
     minHeight: '100vh',
     background: 'linear-gradient(135deg, #e3f2fd 0%, #ffffff 60%)',
-    display: 'flex', alignItems: 'center', justifyContent: 'center',
-    padding: '24px',
+    display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px',
   },
   card: {
     background: '#fff', border: '1px solid #e3f2fd',
@@ -173,8 +152,7 @@ const s = {
   },
   logo: {
     textAlign: 'center', fontSize: '24px',
-    fontWeight: 800, color: '#000',
-    textDecoration: 'none', display: 'block',
+    fontWeight: 800, color: '#000', textDecoration: 'none', display: 'block',
   },
   blue: { color: '#2196F3' },
   buyerBadge: {
@@ -185,29 +163,15 @@ const s = {
     padding: '6px 16px', alignSelf: 'center',
   },
   heading: { color: '#000', fontSize: '22px', fontWeight: 700, margin: 0, textAlign: 'center' },
-  sub: { color: '#777', fontSize: '13px', textAlign: 'center', margin: 0 },
+  sub:     { color: '#777', fontSize: '13px', textAlign: 'center', margin: 0 },
 
-  googleBtn: {
-    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px',
-    padding: '11px', background: '#fff',
-    border: '1.5px solid #e0e0e0', borderRadius: '10px',
-    fontSize: '14px', fontWeight: 600, color: '#333',
-    cursor: 'pointer', width: '100%',
-    boxShadow: '0 1px 4px rgba(0,0,0,.06)',
-  },
-
-  divider: { display: 'flex', alignItems: 'center', gap: '10px' },
-  line: { flex: 1, borderTop: '1px solid #e3f2fd' },
-  orText: { color: '#aaa', fontSize: '12px', whiteSpace: 'nowrap' },
-
-  form: { display: 'flex', flexDirection: 'column', gap: '14px' },
+  form:  { display: 'flex', flexDirection: 'column', gap: '14px' },
   field: { display: 'flex', flexDirection: 'column', gap: '6px' },
   label: { color: '#000', fontSize: '13px', fontWeight: 600 },
   inputWrap: {
     display: 'flex', alignItems: 'center', gap: '10px',
     background: '#f0f8ff', border: '1.5px solid #bbdefb',
     borderRadius: '10px', padding: '0 12px',
-    transition: 'border-color .2s',
   },
   input: {
     flex: 1, background: 'none', border: 'none', outline: 'none',
@@ -217,35 +181,29 @@ const s = {
     background: 'none', border: 'none', color: '#aaa',
     cursor: 'pointer', display: 'flex', padding: 0, flexShrink: 0,
   },
-
   checkList: {
     display: 'flex', flexDirection: 'column', gap: '6px',
     background: '#f0f8ff', borderRadius: '10px', padding: '12px 14px',
   },
-  checkItem: { display: 'flex', alignItems: 'center', gap: '8px' },
+  checkItem:  { display: 'flex', alignItems: 'center', gap: '8px' },
   checkDot: {
     width: '16px', height: '16px', borderRadius: '50%',
     display: 'flex', alignItems: 'center', justifyContent: 'center',
     flexShrink: 0, transition: 'background .2s',
   },
   checkLabel: { fontSize: '12px', transition: 'color .2s' },
-
   submitBtn: {
     padding: '13px', background: '#2196F3', color: '#fff',
     border: 'none', borderRadius: '10px',
     fontSize: '15px', fontWeight: 700, cursor: 'pointer',
-    boxShadow: '0 4px 14px rgba(33,150,243,0.3)',
-    marginTop: '2px',
+    boxShadow: '0 4px 14px rgba(33,150,243,0.3)', marginTop: '2px',
   },
-
   footer: { color: '#777', fontSize: '13px', textAlign: 'center', margin: 0 },
-  link: { color: '#2196F3', fontWeight: 600, textDecoration: 'none' },
-
+  link:   { color: '#2196F3', fontWeight: 600, textDecoration: 'none' },
   sellerNote: {
     background: '#f0f8ff', border: '1px solid #bbdefb',
     borderRadius: '10px', padding: '12px 14px',
-    color: '#777', fontSize: '12px', textAlign: 'center',
-    lineHeight: '1.6',
+    color: '#777', fontSize: '12px', textAlign: 'center', lineHeight: '1.6',
   },
 }
 
