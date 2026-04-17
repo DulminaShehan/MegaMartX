@@ -13,6 +13,7 @@ const multer   = require('multer')
 const bcrypt   = require('bcryptjs')
 const jwt      = require('jsonwebtoken')
 require('dotenv').config({ path: path.resolve(__dirname, '../.env') })
+const crypto = require('crypto')
 
 const JWT_SECRET  = process.env.JWT_SECRET  || 'megamartx-dev-secret'
 const JWT_EXPIRES = '7d'
@@ -37,6 +38,21 @@ const optionalAuth = (req, res, next) => {
     try { req.user = jwt.verify(header.slice(7), JWT_SECRET) } catch { /* ignore */ }
   }
   next()
+}
+
+// Admin-only middleware — verifies JWT and checks role === 'admin'
+const requireAdmin = (req, res, next) => {
+  const header = req.headers.authorization
+  if (!header?.startsWith('Bearer '))
+    return res.status(401).json({ error: 'Unauthorized — login required' })
+  try {
+    req.user = jwt.verify(header.slice(7), JWT_SECRET)
+    if (req.user.role !== 'admin')
+      return res.status(403).json({ error: 'Admin access required' })
+    next()
+  } catch {
+    res.status(401).json({ error: 'Token invalid or expired — please login again' })
+  }
 }
 
 // ── Stripe (optional — only active when key is present) ───────
@@ -225,6 +241,17 @@ const initDB = async () => {
         quantity   INT DEFAULT 1,
         createdAt  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         UNIQUE KEY uq_user_product (userId, productId)
+      )
+    `)
+
+    // API Keys (admin-managed)
+    await conn.execute(`
+      CREATE TABLE IF NOT EXISTS api_keys (
+        id        INT AUTO_INCREMENT PRIMARY KEY,
+        apiKey    VARCHAR(255) NOT NULL,
+        label     VARCHAR(255) DEFAULT '',
+        createdBy VARCHAR(128) DEFAULT '',
+        createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `)
 
@@ -734,6 +761,137 @@ app.post('/api/stripe/create-payment-intent', async (req, res) => {
     res.json({ clientSecret: intent.client_secret, id: intent.id })
   } catch (err) {
     console.error('Stripe error:', err.message)
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// ═══════════════════════════════════════════════════════════
+// ADMIN  (all routes require role === 'admin')
+// ═══════════════════════════════════════════════════════════
+
+// GET /api/admin/stats — dashboard overview counts
+app.get('/api/admin/stats', requireAdmin, async (req, res) => {
+  try {
+    const [[{ total_users    }]] = await pool.execute('SELECT COUNT(*) as total_users FROM users')
+    const [[{ total_sellers  }]] = await pool.execute("SELECT COUNT(*) as total_sellers FROM users WHERE role = 'seller'")
+    const [[{ total_buyers   }]] = await pool.execute("SELECT COUNT(*) as total_buyers FROM users WHERE role = 'user'")
+    const [[{ total_admins   }]] = await pool.execute("SELECT COUNT(*) as total_admins FROM users WHERE role = 'admin'")
+    const [[{ total_products }]] = await pool.execute('SELECT COUNT(*) as total_products FROM products')
+    const [[{ total_orders   }]] = await pool.execute('SELECT COUNT(*) as total_orders FROM orders')
+    const [[{ revenue        }]] = await pool.execute('SELECT COALESCE(SUM(total), 0) as revenue FROM orders')
+    res.json({
+      totalUsers:    total_users,
+      totalSellers:  total_sellers,
+      totalBuyers:   total_buyers,
+      totalAdmins:   total_admins,
+      totalProducts: total_products,
+      totalOrders:   total_orders,
+      totalRevenue:  revenue,
+    })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// GET /api/admin/users?role= — list all users, optional role filter
+app.get('/api/admin/users', requireAdmin, async (req, res) => {
+  try {
+    const { role } = req.query
+    let query  = 'SELECT uid, name, email, role, storeName, phone, createdAt FROM users'
+    const params = []
+    if (role) { query += ' WHERE role = ?'; params.push(role) }
+    query += ' ORDER BY createdAt DESC'
+    const [rows] = await pool.execute(query, params)
+    res.json(rows)
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// PUT /api/admin/users/:uid/role — change a user's role
+app.put('/api/admin/users/:uid/role', requireAdmin, async (req, res) => {
+  const { role } = req.body
+  if (!['user', 'seller', 'admin'].includes(role))
+    return res.status(400).json({ error: 'Invalid role' })
+  try {
+    await pool.execute('UPDATE users SET role = ? WHERE uid = ?', [role, req.params.uid])
+    res.json({ success: true })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// DELETE /api/admin/users/:uid — delete a user (admin cannot delete themselves)
+app.delete('/api/admin/users/:uid', requireAdmin, async (req, res) => {
+  if (req.user.uid === req.params.uid)
+    return res.status(400).json({ error: 'You cannot delete your own account' })
+  try {
+    await pool.execute('DELETE FROM users WHERE uid = ?', [req.params.uid])
+    res.json({ success: true })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// POST /api/admin/create-admin — create a new admin account
+app.post('/api/admin/create-admin', requireAdmin, async (req, res) => {
+  const { name, email, password } = req.body
+  if (!name || !email || !password)
+    return res.status(400).json({ error: 'name, email and password are required' })
+  if (password.length < 6)
+    return res.status(400).json({ error: 'Password must be at least 6 characters' })
+  try {
+    const [existing] = await pool.execute('SELECT uid FROM users WHERE email = ?', [email])
+    if (existing.length)
+      return res.status(409).json({ error: 'Email already registered', code: 'auth/email-already-in-use' })
+
+    const uid  = uuidv4()
+    const hash = await bcrypt.hash(password, 10)
+    await pool.execute(
+      'INSERT INTO users (uid, name, email, password, role) VALUES (?, ?, ?, ?, ?)',
+      [uid, name, email, hash, 'admin']
+    )
+    const [rows] = await pool.execute(
+      'SELECT uid, name, email, role, createdAt FROM users WHERE uid = ?', [uid]
+    )
+    res.json(rows[0])
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// GET /api/admin/api-keys — list all API keys
+app.get('/api/admin/api-keys', requireAdmin, async (req, res) => {
+  try {
+    const [rows] = await pool.execute('SELECT * FROM api_keys ORDER BY createdAt DESC')
+    res.json(rows)
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// POST /api/admin/api-keys — generate a new API key
+app.post('/api/admin/api-keys', requireAdmin, async (req, res) => {
+  const { label = '' } = req.body
+  const apiKey = 'mmx_' + crypto.randomBytes(24).toString('hex')
+  try {
+    const [result] = await pool.execute(
+      'INSERT INTO api_keys (apiKey, label, createdBy) VALUES (?, ?, ?)',
+      [apiKey, label, req.user.uid]
+    )
+    const [rows] = await pool.execute('SELECT * FROM api_keys WHERE id = ?', [result.insertId])
+    res.json(rows[0])
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// DELETE /api/admin/api-keys/:id — delete an API key
+app.delete('/api/admin/api-keys/:id', requireAdmin, async (req, res) => {
+  try {
+    await pool.execute('DELETE FROM api_keys WHERE id = ?', [req.params.id])
+    res.json({ success: true })
+  } catch (err) {
     res.status(500).json({ error: err.message })
   }
 })

@@ -6,7 +6,7 @@ import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import {
   FiShoppingCart, FiSearch, FiMenu, FiX,
-  FiUser, FiLogOut, FiPackage, FiShield, FiChevronDown,
+  FiUser, FiLogOut, FiPackage, FiShield, FiChevronDown, FiKey,
 } from 'react-icons/fi'
 import { useAuth } from '../context/AuthContext'
 import { useCart } from '../context/CartContext'
@@ -117,6 +117,11 @@ const Navbar = () => {
                         <FiShield size={15} /> Admin Panel
                       </Link>
                     )}
+                    {isAdmin && (
+                      <Link to="/admin?section=apikeys" style={s.dropItem} onClick={() => setDropdownOpen(false)}>
+                        <FiKey size={15} /> API Keys
+                      </Link>
+                    )}
                     <div style={s.dropDivider} />
                     <button style={s.dropLogout} onClick={handleLogout}>
                       <FiLogOut size={15} /> Logout
@@ -170,6 +175,7 @@ const Navbar = () => {
               <Link to="/orders" style={s.mobileLink} onClick={() => setMenuOpen(false)}>My Orders</Link>
               {isSeller && <Link to="/seller" style={s.mobileLink} onClick={() => setMenuOpen(false)}>Seller Dashboard</Link>}
               {isAdmin && <Link to="/admin" style={s.mobileLink} onClick={() => setMenuOpen(false)}>Admin Panel</Link>}
+              {isAdmin && <Link to="/admin?section=apikeys" style={s.mobileLink} onClick={() => setMenuOpen(false)}>API Keys</Link>}
               <button style={s.mobileLogout} onClick={handleLogout}>Logout</button>
             </>
           ) : (
