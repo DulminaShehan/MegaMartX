@@ -52,6 +52,80 @@ const roleBadgeStyle = (role) => ({
   user:   { background: '#e3f2fd', color: '#1565c0', border: '1px solid #90caf9' },
 }[role] || { background: '#e3f2fd', color: '#1565c0', border: '1px solid #90caf9' })
 
+const METHOD_COLORS = {
+  GET:    '#1565C0',
+  POST:   '#2e7d32',
+  PUT:    '#e65100',
+  DELETE: '#c62828',
+}
+
+const API_DOCS = [
+  {
+    method:  'GET',
+    path:    '/api/v1/ping',
+    desc:    'Verify your key works',
+    example: `curl http://localhost:5000/api/v1/ping \\
+  -H "X-API-Key: YOUR_KEY"`,
+  },
+  {
+    method:  'GET',
+    path:    '/api/v1/products',
+    desc:    'List products  (params: search, category, minPrice, maxPrice, limit, offset)',
+    example: `curl "http://localhost:5000/api/v1/products?limit=10&search=phone" \\
+  -H "X-API-Key: YOUR_KEY"`,
+  },
+  {
+    method:  'GET',
+    path:    '/api/v1/products/:id',
+    desc:    'Get a single product by ID',
+    example: `curl http://localhost:5000/api/v1/products/PRODUCT_ID \\
+  -H "X-API-Key: YOUR_KEY"`,
+  },
+  {
+    method:  'GET',
+    path:    '/api/v1/orders',
+    desc:    'List orders  (params: userId, status, limit, offset)',
+    example: `curl "http://localhost:5000/api/v1/orders?status=pending" \\
+  -H "X-API-Key: YOUR_KEY"`,
+  },
+  {
+    method:  'GET',
+    path:    '/api/v1/orders/:id',
+    desc:    'Get a single order with all items',
+    example: `curl http://localhost:5000/api/v1/orders/ORDER_ID \\
+  -H "X-API-Key: YOUR_KEY"`,
+  },
+  {
+    method:  'POST',
+    path:    '/api/v1/orders',
+    desc:    'Create a new order programmatically',
+    example: `curl -X POST http://localhost:5000/api/v1/orders \\
+  -H "X-API-Key: YOUR_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "userId":        "user-uid",
+    "userName":      "John Doe",
+    "userEmail":     "john@example.com",
+    "address":       "123 Main St, City",
+    "phone":         "+1 555 000 0000",
+    "paymentMethod": "COD",
+    "items": [
+      { "productId": "pid", "title": "Widget", "price": 29.99,
+        "quantity": 2, "imageUrl": "", "sellerName": "Shop A" }
+    ]
+  }'`,
+  },
+  {
+    method:  'PUT',
+    path:    '/api/v1/orders/:id/status',
+    desc:    'Update order status  (pending · processing · shipped · delivered · cancelled)',
+    example: `curl -X PUT http://localhost:5000/api/v1/orders/ORDER_ID/status \\
+  -H "X-API-Key: YOUR_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{ "status": "shipped" }'`,
+  },
+]
+
 // ── Main component ────────────────────────────────────────────
 const AdminPanel = () => {
   const { currentUser } = useAuth()
@@ -69,9 +143,16 @@ const AdminPanel = () => {
   const [orders,   setOrders]   = useState([])
   const [apiKeys,  setApiKeys]  = useState([])
 
+  const [usersError, setUsersError] = useState(null)
+
+  const initSection = searchParams.get('section') || 'dashboard'
   const [loading, setLoading] = useState({
-    stats: true, users: false, admins: false,
-    products: false, orders: false, apikeys: false,
+    stats: true,
+    users:    initSection === 'users',
+    admins:   initSection === 'admins',
+    products: initSection === 'products',
+    orders:   initSection === 'orders',
+    apikeys:  initSection === 'apikeys',
   })
   const fetched = useRef(new Set())
 
@@ -107,16 +188,32 @@ const AdminPanel = () => {
       .finally(() => setLoading(l => ({ ...l, stats: false })))
   }, [])
 
-  // ── Lazy-fetch section data ─────────────────────────────────
+  // ── Load users (always fresh — no cache) ────────────────────
+  const loadUsers = async () => {
+    setLoading(l => ({ ...l, users: true }))
+    setUsersError(null)
+    try {
+      const d = await api('GET', '/api/admin/users')
+      setUsers(Array.isArray(d) ? d : [])
+    } catch (err) {
+      setUsersError(err.message)
+      toast.error('Failed to load users: ' + err.message)
+    } finally {
+      setLoading(l => ({ ...l, users: false }))
+    }
+  }
+
+  useEffect(() => {
+    if (section === 'users') loadUsers()
+  }, [section])
+
+  // ── Lazy-fetch for other sections ───────────────────────────
   const fetchSection = async (name) => {
+    if (name === 'users') return          // handled by loadUsers
     if (fetched.current.has(name)) return
     setLoading(l => ({ ...l, [name]: true }))
     try {
       switch (name) {
-        case 'users': {
-          const d = await api('GET', '/api/admin/users')
-          setUsers(d); break
-        }
         case 'admins': {
           const d = await api('GET', '/api/admin/users?role=admin')
           setAdmins(d); break
@@ -144,8 +241,14 @@ const AdminPanel = () => {
   }
 
   useEffect(() => {
-    if (section !== 'dashboard') fetchSection(section)
+    if (section !== 'dashboard' && section !== 'users') fetchSection(section)
   }, [section])
+
+  const refreshSection = (name) => {
+    if (name === 'users') { loadUsers(); return }
+    fetched.current.delete(name)
+    fetchSection(name)
+  }
 
   const navTo = (s) => { setSection(s); setSidebarOpen(false) }
 
@@ -246,6 +349,10 @@ const AdminPanel = () => {
   // ── Render ──────────────────────────────────────────────────
   return (
     <div style={{ ...s.shell, ...(isMobile ? {} : s.shellDesktop) }}>
+      <style>{`
+        @keyframes spin    { from { transform: rotate(0deg) } to { transform: rotate(360deg) } }
+        @keyframes shimmer { from { background-position: 200% 0 } to { background-position: -200% 0 } }
+      `}</style>
 
       {/* Mobile overlay */}
       {isMobile && sidebarOpen && (
@@ -337,6 +444,26 @@ const AdminPanel = () => {
         {/* ─── Users ───────────────────────────────────────────── */}
         {section === 'users' && (
           <div style={s.content}>
+
+            {/* Section header */}
+            <div style={s.sectionHeader}>
+              <div>
+                <h2 style={s.sectionTitle}>Registered Users</h2>
+                <p style={s.sectionSub}>
+                  {users.length} registered account{users.length !== 1 ? 's' : ''} in total
+                </p>
+              </div>
+              <button
+                style={s.refreshBtn}
+                onClick={() => refreshSection('users')}
+                disabled={loading.users}
+                title="Reload user list"
+              >
+                <FiRefreshCw size={14} style={{ animation: loading.users ? 'spin 1s linear infinite' : 'none' }} />
+                {loading.users ? 'Loading…' : 'Refresh'}
+              </button>
+            </div>
+
             {/* Role filter */}
             <div style={s.filterBar}>
               <span style={s.filterLabel}>Filter:</span>
@@ -359,9 +486,34 @@ const AdminPanel = () => {
               </span>
             </div>
 
-            {loading.users ? (
-              <p style={s.loadingMsg}>Loading users…</p>
-            ) : (
+            {/* Error state */}
+            {usersError && !loading.users && (
+              <div style={s.errorCard}>
+                <strong>Failed to load users:</strong> {usersError}
+                <button style={s.retryBtn} onClick={loadUsers}>Retry</button>
+              </div>
+            )}
+
+            {/* Loading skeleton */}
+            {loading.users && (
+              <div style={s.skeletonWrap}>
+                {[1,2,3,4].map(i => (
+                  <div key={i} style={s.skeletonRow}>
+                    <div style={{ ...s.skeleton, width: '32px', height: '32px', borderRadius: '50%' }} />
+                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                      <div style={{ ...s.skeleton, width: '140px', height: '12px' }} />
+                      <div style={{ ...s.skeleton, width: '200px', height: '10px' }} />
+                    </div>
+                    <div style={{ ...s.skeleton, width: '60px', height: '22px', borderRadius: '20px' }} />
+                    <div style={{ ...s.skeleton, width: '80px', height: '12px' }} />
+                    <div style={{ ...s.skeleton, width: '90px', height: '28px' }} />
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Data table */}
+            {!loading.users && !usersError && (
               <div style={{ overflowX: 'auto' }}>
                 <table style={s.table}>
                   <thead>
@@ -408,7 +560,9 @@ const AdminPanel = () => {
                     ))}
                     {filteredUsers.length === 0 && (
                       <tr>
-                        <td colSpan={6} style={s.emptyCell}>No users found</td>
+                        <td colSpan={6} style={s.emptyCell}>
+                          {users.length === 0 ? 'No users registered yet' : 'No users match this filter'}
+                        </td>
                       </tr>
                     )}
                   </tbody>
@@ -617,6 +771,7 @@ const AdminPanel = () => {
         {/* ─── API Keys ────────────────────────────────────────── */}
         {section === 'apikeys' && (
           <div style={s.content}>
+
             {/* Generate row */}
             <div style={s.card}>
               <h3 style={s.cardTitle}><FiKey size={15} /> Generate New API Key</h3>
@@ -694,6 +849,32 @@ const AdminPanel = () => {
                 </table>
               </div>
             )}
+
+            {/* ── API Reference docs ───────────────────────────── */}
+            <div style={{ marginTop: '28px' }}>
+              <h3 style={{ color: '#000', fontSize: '15px', fontWeight: 700, marginBottom: '4px' }}>
+                How to use your API key
+              </h3>
+              <p style={{ color: '#777', fontSize: '13px', margin: '0 0 16px' }}>
+                Send your key in the <code style={s.inlineCode}>X-API-Key</code> header with every request.
+                Base URL: <code style={s.inlineCode}>http://localhost:5000</code>
+              </p>
+
+              {API_DOCS.map(doc => (
+                <div key={doc.path} style={s.docBlock}>
+                  <div style={s.docHead}>
+                    <span style={{ ...s.methodBadge, background: METHOD_COLORS[doc.method] }}>
+                      {doc.method}
+                    </span>
+                    <code style={s.docPath}>{doc.path}</code>
+                    <span style={s.docDesc}>{doc.desc}</span>
+                  </div>
+
+                  <pre style={s.docPre}>{doc.example}</pre>
+                </div>
+              ))}
+            </div>
+
           </div>
         )}
       </main>
@@ -866,6 +1047,22 @@ const s = {
   revenueLabel: { color: 'rgba(255,255,255,0.8)', fontSize: '13px', margin: '0 0 6px', fontWeight: 500 },
   revenueVal:   { color: '#fff', fontSize: '30px', fontWeight: 800, margin: 0 },
 
+  // Section header (title + refresh)
+  sectionHeader: {
+    display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between',
+    marginBottom: '18px', gap: '12px', flexWrap: 'wrap',
+  },
+  sectionTitle: { color: '#000', fontSize: '18px', fontWeight: 700, margin: 0 },
+  sectionSub:   { color: '#888', fontSize: '12px', margin: '4px 0 0' },
+  refreshBtn: {
+    display: 'flex', alignItems: 'center', gap: '6px',
+    padding: '7px 14px',
+    background: '#f0f8ff', border: '1.5px solid #bbdefb',
+    borderRadius: '8px', color: '#1565C0',
+    fontSize: '12px', fontWeight: 600, cursor: 'pointer',
+    whiteSpace: 'nowrap', flexShrink: 0,
+  },
+
   // Filter bar
   filterBar: {
     display: 'flex', alignItems: 'center',
@@ -918,6 +1115,33 @@ const s = {
     cursor: 'pointer', padding: '6px', display: 'flex',
   },
   emptyCell: { padding: '28px', textAlign: 'center', color: '#aaa', fontSize: '13px' },
+
+  // Error + skeleton
+  errorCard: {
+    display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap',
+    background: '#fff0f0', border: '1px solid #fecaca',
+    borderRadius: '10px', padding: '14px 16px',
+    color: '#c62828', fontSize: '13px', marginBottom: '14px',
+  },
+  retryBtn: {
+    marginLeft: 'auto', padding: '6px 14px',
+    background: '#e53935', color: '#fff',
+    border: 'none', borderRadius: '7px',
+    fontSize: '12px', fontWeight: 600, cursor: 'pointer',
+  },
+  skeletonWrap: { display: 'flex', flexDirection: 'column', gap: '10px' },
+  skeletonRow: {
+    display: 'flex', alignItems: 'center', gap: '16px',
+    padding: '10px 14px',
+    background: '#fff', border: '1px solid #f0f8ff', borderRadius: '8px',
+  },
+  skeleton: {
+    background: 'linear-gradient(90deg, #e3f2fd 25%, #bbdefb 50%, #e3f2fd 75%)',
+    backgroundSize: '200% 100%',
+    animation: 'shimmer 1.4s infinite',
+    borderRadius: '4px',
+    flexShrink: 0,
+  },
   emptyCard: {
     background: '#f0f8ff', border: '1px solid #e3f2fd',
     borderRadius: '12px', padding: '36px',
@@ -1021,6 +1245,47 @@ const s = {
     background: '#f0f8ff', border: '1px solid #e3f2fd',
     borderRadius: '6px', cursor: 'pointer',
     padding: '5px', display: 'flex', flexShrink: 0, color: '#555',
+  },
+
+  // API Docs
+  inlineCode: {
+    background: '#f0f8ff', border: '1px solid #e3f2fd',
+    borderRadius: '4px', padding: '1px 6px',
+    fontSize: '12px', fontFamily: 'monospace', color: '#1565C0',
+  },
+  docBlock: {
+    marginBottom: '14px',
+    border: '1px solid #e3f2fd',
+    borderRadius: '10px',
+    overflow: 'hidden',
+  },
+  docHead: {
+    display: 'flex', alignItems: 'center', gap: '10px',
+    padding: '10px 14px',
+    background: '#f8faff',
+    borderBottom: '1px solid #e3f2fd',
+    flexWrap: 'wrap',
+  },
+  methodBadge: {
+    color: '#fff', fontSize: '11px', fontWeight: 800,
+    padding: '3px 9px', borderRadius: '5px',
+    letterSpacing: '0.5px', flexShrink: 0,
+  },
+  docPath: {
+    fontFamily: 'monospace', fontSize: '13px', fontWeight: 600,
+    color: '#000', flexShrink: 0,
+  },
+  docDesc: { color: '#666', fontSize: '12px' },
+  docPre: {
+    margin: 0,
+    padding: '12px 16px',
+    background: '#0d1117',
+    color: '#e6edf3',
+    fontSize: '12px',
+    fontFamily: 'monospace',
+    lineHeight: 1.7,
+    overflowX: 'auto',
+    whiteSpace: 'pre',
   },
 }
 

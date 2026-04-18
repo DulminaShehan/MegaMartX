@@ -55,6 +55,24 @@ const requireAdmin = (req, res, next) => {
   }
 }
 
+// API Key middleware — validates X-API-Key header against api_keys table
+const requireApiKey = async (req, res, next) => {
+  const key = req.headers['x-api-key']
+  if (!key)
+    return res.status(401).json({ error: 'Missing API key. Send it as X-API-Key header.' })
+  try {
+    const [rows] = await pool.execute(
+      'SELECT id, label, createdBy FROM api_keys WHERE apiKey = ?', [key]
+    )
+    if (!rows.length)
+      return res.status(403).json({ error: 'Invalid or revoked API key.' })
+    req.apiKey = rows[0]   // attach key info to request
+    next()
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+}
+
 // ── Stripe (optional — only active when key is present) ───────
 let stripe = null
 if (process.env.STRIPE_SECRET_KEY) {
@@ -891,6 +909,163 @@ app.delete('/api/admin/api-keys/:id', requireAdmin, async (req, res) => {
   try {
     await pool.execute('DELETE FROM api_keys WHERE id = ?', [req.params.id])
     res.json({ success: true })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// ═══════════════════════════════════════════════════════════
+// PUBLIC API  (authenticated via X-API-Key header)
+// Base: /api/v1/...
+// ═══════════════════════════════════════════════════════════
+
+// GET /api/v1/ping — verify your key works
+app.get('/api/v1/ping', requireApiKey, (req, res) => {
+  res.json({
+    success: true,
+    message: 'API key valid',
+    key:     { id: req.apiKey.id, label: req.apiKey.label },
+  })
+})
+
+// GET /api/v1/products — list all active products
+app.get('/api/v1/products', requireApiKey, async (req, res) => {
+  try {
+    const { search, category, minPrice, maxPrice, limit = 50, offset = 0 } = req.query
+    let query  = 'SELECT id, title, price, category, stock, imageUrl, sellerName FROM products WHERE 1=1'
+    const params = []
+
+    if (search)    { query += ' AND title LIKE ?';         params.push(`%${search}%`) }
+    if (category)  { query += ' AND category = ?';         params.push(category) }
+    if (minPrice)  { query += ' AND price >= ?';           params.push(Number(minPrice)) }
+    if (maxPrice)  { query += ' AND price <= ?';           params.push(Number(maxPrice)) }
+
+    query += ' ORDER BY createdAt DESC LIMIT ? OFFSET ?'
+    params.push(Number(limit), Number(offset))
+
+    const [rows] = await pool.execute(query, params)
+    const [[{ total }]] = await pool.execute(
+      'SELECT COUNT(*) as total FROM products WHERE 1=1' +
+      (search   ? ' AND title LIKE ?' : '') +
+      (category ? ' AND category = ?' : '') +
+      (minPrice ? ' AND price >= ?'   : '') +
+      (maxPrice ? ' AND price <= ?'   : ''),
+      params.slice(0, params.length - 2)
+    )
+    res.json({ total, limit: Number(limit), offset: Number(offset), products: rows })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// GET /api/v1/products/:id — get single product
+app.get('/api/v1/products/:id', requireApiKey, async (req, res) => {
+  try {
+    const [rows] = await pool.execute('SELECT * FROM products WHERE id = ?', [req.params.id])
+    if (!rows.length) return res.status(404).json({ error: 'Product not found' })
+    res.json(rows[0])
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// GET /api/v1/orders — list orders (optionally filter by userId or status)
+app.get('/api/v1/orders', requireApiKey, async (req, res) => {
+  try {
+    const { userId, status, limit = 50, offset = 0 } = req.query
+    let query  = `
+      SELECT o.id, o.userId, o.total, o.status, o.paymentMethod,
+             o.address, o.phone, o.createdAt,
+             JSON_ARRAYAGG(
+               JSON_OBJECT(
+                 'productId', oi.productId,
+                 'title',     oi.title,
+                 'price',     oi.price,
+                 'quantity',  oi.quantity
+               )
+             ) AS items
+      FROM orders o
+      LEFT JOIN order_items oi ON oi.orderId = o.id
+      WHERE 1=1`
+    const params = []
+
+    if (userId) { query += ' AND o.userId = ?'; params.push(userId) }
+    if (status) { query += ' AND o.status = ?'; params.push(status) }
+
+    query += ' GROUP BY o.id ORDER BY o.createdAt DESC LIMIT ? OFFSET ?'
+    params.push(Number(limit), Number(offset))
+
+    const [rows] = await pool.execute(query, params)
+    res.json({ limit: Number(limit), offset: Number(offset), orders: rows })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// GET /api/v1/orders/:id — get single order with items
+app.get('/api/v1/orders/:id', requireApiKey, async (req, res) => {
+  try {
+    const [orders] = await pool.execute('SELECT * FROM orders WHERE id = ?', [req.params.id])
+    if (!orders.length) return res.status(404).json({ error: 'Order not found' })
+    const [items] = await pool.execute('SELECT * FROM order_items WHERE orderId = ?', [req.params.id])
+    res.json({ ...orders[0], items })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// POST /api/v1/orders — create a new order
+app.post('/api/v1/orders', requireApiKey, async (req, res) => {
+  const {
+    userId, userName, userEmail,
+    address, phone, paymentMethod = 'COD',
+    items,   // [{ productId, title, price, quantity, imageUrl, sellerName }]
+  } = req.body
+
+  if (!userId || !address || !phone || !Array.isArray(items) || !items.length)
+    return res.status(400).json({ error: 'userId, address, phone, and items[] are required' })
+
+  const total = items.reduce((s, i) => s + i.price * i.quantity, 0)
+  const orderId = uuidv4()
+  const deliveryDate = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString()
+
+  try {
+    await pool.execute(
+      `INSERT INTO orders (id, userId, userName, userEmail, total, status, paymentMethod,
+                           address, phone, deliveryDate)
+       VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)`,
+      [orderId, userId, userName || '', userEmail || '', total,
+       paymentMethod, address, phone, deliveryDate]
+    )
+    for (const item of items) {
+      await pool.execute(
+        `INSERT INTO order_items (orderId, productId, title, price, quantity, imageUrl, sellerName)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [orderId, item.productId, item.title, item.price,
+         item.quantity, item.imageUrl || '', item.sellerName || '']
+      )
+    }
+    res.status(201).json({
+      success: true, orderId, total,
+      status: 'pending', deliveryDate,
+    })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// PUT /api/v1/orders/:id/status — update order status
+app.put('/api/v1/orders/:id/status', requireApiKey, async (req, res) => {
+  const { status } = req.body
+  const valid = ['pending', 'processing', 'shipped', 'delivered', 'cancelled']
+  if (!valid.includes(status))
+    return res.status(400).json({ error: `status must be one of: ${valid.join(', ')}` })
+  try {
+    const [result] = await pool.execute(
+      'UPDATE orders SET status = ? WHERE id = ?', [status, req.params.id]
+    )
+    if (!result.affectedRows) return res.status(404).json({ error: 'Order not found' })
+    res.json({ success: true, orderId: req.params.id, status })
   } catch (err) {
     res.status(500).json({ error: err.message })
   }

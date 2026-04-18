@@ -155,6 +155,9 @@ const Navbar = () => {
               <Link to="/login" style={s.loginBtn}>Login</Link>
               <Link to="/register" style={s.signupBtn}>Sign Up</Link>
               <Link to="/seller-register" style={s.sellerBtn}>Become a Seller</Link>
+              <Link to="/admin-register" style={s.adminRegBtn}>
+                <FiShield size={13} /> Admin
+              </Link>
             </div>
           )}
 
@@ -218,6 +221,9 @@ const Navbar = () => {
               <Link to="/login" style={{ ...s.loginBtn, flex: 1, textAlign: 'center' }} onClick={() => setMenuOpen(false)}>Login</Link>
               <Link to="/register" style={{ ...s.signupBtn, flex: 1, textAlign: 'center' }} onClick={() => setMenuOpen(false)}>Sign Up</Link>
               <Link to="/seller-register" style={{ ...s.sellerBtn, width: '100%', textAlign: 'center' }} onClick={() => setMenuOpen(false)}>Become a Seller</Link>
+              <Link to="/admin-register" style={{ ...s.adminRegBtn, width: '100%', justifyContent: 'center' }} onClick={() => setMenuOpen(false)}>
+                <FiShield size={13} /> Admin Sign Up
+              </Link>
             </div>
           )}
         </div>
@@ -490,6 +496,19 @@ const s = {
     fontWeight: 700,
     whiteSpace: 'nowrap',
     boxShadow: '0 2px 8px rgba(33,150,243,0.3)',
+  },
+  adminRegBtn: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '5px',
+    color: '#1565C0',
+    padding: '7px 14px',
+    background: '#e8f4fd',
+    border: '1.5px solid #1565C0',
+    borderRadius: '8px',
+    fontSize: '13px',
+    fontWeight: 700,
+    whiteSpace: 'nowrap',
   },
 
   // Mobile

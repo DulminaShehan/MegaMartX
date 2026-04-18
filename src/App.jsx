@@ -14,7 +14,8 @@ import ProductDetails from './pages/ProductDetails'
 import Cart           from './pages/Cart'
 import Login          from './pages/Login'
 import Register       from './pages/Register'
-import SellerRegister from './pages/SellerRegister'
+import SellerRegister  from './pages/SellerRegister'
+import AdminRegister   from './pages/AdminRegister'
 import SellerDashboard from './pages/SellerDashboard'
 import AdminPanel     from './pages/AdminPanel'
 import OrderHistory      from './pages/OrderHistory'
@@ -105,6 +106,7 @@ const App = () => (
                 <Route path="/login"       element={<Login />} />
                 <Route path="/register"         element={<Register />} />
                 <Route path="/seller-register" element={<SellerRegister />} />
+                <Route path="/admin-register"  element={<AdminRegister />} />
                 <Route path="/about"       element={<About />} />
                 <Route path="/contact"     element={<Contact />} />
 
