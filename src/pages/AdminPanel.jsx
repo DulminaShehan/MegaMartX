@@ -31,8 +31,9 @@ const api = async (method, path, body) => {
   if (body !== undefined) opts.body = JSON.stringify(body)
   const res  = await fetch(`${BASE}${path}`, opts)
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: res.statusText }))
-    throw new Error(err.error || 'Request failed')
+    const data = await res.json().catch(() => null)
+    const msg  = data?.error || res.statusText || 'Request failed'
+    throw new Error(`${res.status} ${msg}`)
   }
   return res.json()
 }
@@ -450,7 +451,9 @@ const AdminPanel = () => {
               <div>
                 <h2 style={s.sectionTitle}>Registered Users</h2>
                 <p style={s.sectionSub}>
-                  {users.length} registered account{users.length !== 1 ? 's' : ''} in total
+                  {stats
+                    ? `${stats.totalUsers} total · ${stats.totalBuyers} buyers · ${stats.totalSellers} sellers · ${stats.totalAdmins} admins`
+                    : 'Loading counts…'}
                 </p>
               </div>
               <button
@@ -462,6 +465,21 @@ const AdminPanel = () => {
                 <FiRefreshCw size={14} style={{ animation: loading.users ? 'spin 1s linear infinite' : 'none' }} />
                 {loading.users ? 'Loading…' : 'Refresh'}
               </button>
+            </div>
+
+            {/* Role breakdown cards — always visible from stats */}
+            <div style={s.roleCards}>
+              {[
+                { label: 'Total Users',  val: stats?.totalUsers   ?? '…', color: '#1565C0', bg: '#e3f2fd', border: '#90caf9' },
+                { label: 'Buyers',       val: stats?.totalBuyers  ?? '…', color: '#2e7d32', bg: '#e8f5e9', border: '#a5d6a7' },
+                { label: 'Sellers',      val: stats?.totalSellers ?? '…', color: '#e65100', bg: '#fff3e0', border: '#ffcc80' },
+                { label: 'Admins',       val: stats?.totalAdmins  ?? '…', color: '#c62828', bg: '#fce4ec', border: '#ef9a9a' },
+              ].map(({ label, val, color, bg, border }) => (
+                <div key={label} style={{ ...s.roleCard, background: bg, border: `1.5px solid ${border}` }}>
+                  <span style={{ ...s.roleCardVal, color }}>{val}</span>
+                  <span style={{ ...s.roleCardLabel, color }}>{label}</span>
+                </div>
+              ))}
             </div>
 
             {/* Role filter */}
@@ -489,7 +507,14 @@ const AdminPanel = () => {
             {/* Error state */}
             {usersError && !loading.users && (
               <div style={s.errorCard}>
-                <strong>Failed to load users:</strong> {usersError}
+                <div style={{ flex: 1 }}>
+                  <strong>Failed to load user list:</strong> {usersError}
+                  {usersError.toLowerCase().includes('not found') && (
+                    <p style={{ margin: '6px 0 0', fontSize: '12px', color: '#b71c1c' }}>
+                      The server may need a restart — run <code style={{ background: '#ffd7d7', padding: '1px 5px', borderRadius: '3px' }}>node server/index.js</code> again.
+                    </p>
+                  )}
+                </div>
                 <button style={s.retryBtn} onClick={loadUsers}>Retry</button>
               </div>
             )}
@@ -1046,6 +1071,23 @@ const s = {
   },
   revenueLabel: { color: 'rgba(255,255,255,0.8)', fontSize: '13px', margin: '0 0 6px', fontWeight: 500 },
   revenueVal:   { color: '#fff', fontSize: '30px', fontWeight: 800, margin: 0 },
+
+  // Role breakdown cards
+  roleCards: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(4, 1fr)',
+    gap: '12px',
+    marginBottom: '20px',
+  },
+  roleCard: {
+    borderRadius: '12px',
+    padding: '16px 18px',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '4px',
+  },
+  roleCardVal:   { fontSize: '28px', fontWeight: 800, lineHeight: 1 },
+  roleCardLabel: { fontSize: '12px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px', opacity: 0.8 },
 
   // Section header (title + refresh)
   sectionHeader: {

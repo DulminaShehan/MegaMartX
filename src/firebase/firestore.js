@@ -125,3 +125,16 @@ export const removeCartItemDB = (cartItemId) =>
 /** Clear a user's entire cart (called after a successful checkout) */
 export const clearCartDB = (userId) =>
   api('DELETE', `/api/cart/user/${encodeURIComponent(userId)}`)
+
+// ─── REVIEWS ──────────────────────────────────────────────────
+
+/** Get all reviews for a product (public) */
+export const getProductReviews = (productId) =>
+  api('GET', `/api/reviews/product/${encodeURIComponent(productId)}`)
+
+/** Check if user already reviewed a product for a given order */
+export const checkReviewed = (productId, orderId) =>
+  api('GET', `/api/reviews/check?productId=${encodeURIComponent(productId)}&orderId=${encodeURIComponent(orderId)}`)
+
+/** Submit a review */
+export const submitReview = (data) => api('POST', '/api/reviews', data)

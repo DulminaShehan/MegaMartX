@@ -262,6 +262,21 @@ const initDB = async () => {
       )
     `)
 
+    // Reviews
+    await conn.execute(`
+      CREATE TABLE IF NOT EXISTS reviews (
+        id        INT AUTO_INCREMENT PRIMARY KEY,
+        productId VARCHAR(36)  NOT NULL,
+        orderId   VARCHAR(36)  NOT NULL,
+        userId    VARCHAR(128) NOT NULL,
+        userName  VARCHAR(255) DEFAULT '',
+        rating    TINYINT      NOT NULL CHECK (rating BETWEEN 1 AND 5),
+        comment   TEXT,
+        createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_order_product (orderId, productId)
+      )
+    `)
+
     // API Keys (admin-managed)
     await conn.execute(`
       CREATE TABLE IF NOT EXISTS api_keys (
@@ -1066,6 +1081,86 @@ app.put('/api/v1/orders/:id/status', requireApiKey, async (req, res) => {
     )
     if (!result.affectedRows) return res.status(404).json({ error: 'Order not found' })
     res.json({ success: true, orderId: req.params.id, status })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// ═══════════════════════════════════════════════════════════
+// REVIEWS
+// ═══════════════════════════════════════════════════════════
+
+// GET /api/reviews/product/:productId — public, returns reviews + summary
+app.get('/api/reviews/product/:productId', async (req, res) => {
+  try {
+    const [rows] = await pool.execute(
+      `SELECT id, userId, userName, rating, comment, createdAt
+       FROM reviews WHERE productId = ? ORDER BY createdAt DESC`,
+      [req.params.productId]
+    )
+    const avgRating = rows.length
+      ? (rows.reduce((s, r) => s + r.rating, 0) / rows.length).toFixed(1)
+      : null
+    res.json({ reviews: rows, avgRating: avgRating ? Number(avgRating) : null, total: rows.length })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// GET /api/reviews/check — did this user already review this product for this order?
+app.get('/api/reviews/check', requireAuth, async (req, res) => {
+  const { productId, orderId } = req.query
+  if (!productId || !orderId) return res.status(400).json({ error: 'productId and orderId required' })
+  try {
+    const [rows] = await pool.execute(
+      'SELECT id FROM reviews WHERE orderId = ? AND productId = ? AND userId = ?',
+      [orderId, productId, req.user.uid]
+    )
+    res.json({ reviewed: rows.length > 0 })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// POST /api/reviews — submit a review (order must be delivered)
+app.post('/api/reviews', requireAuth, async (req, res) => {
+  const { productId, orderId, rating, comment } = req.body
+  if (!productId || !orderId || !rating)
+    return res.status(400).json({ error: 'productId, orderId and rating are required' })
+  if (rating < 1 || rating > 5)
+    return res.status(400).json({ error: 'rating must be between 1 and 5' })
+
+  try {
+    // Verify order belongs to user and is delivered
+    const [orders] = await pool.execute(
+      'SELECT status, userId FROM orders WHERE id = ?', [orderId]
+    )
+    if (!orders.length) return res.status(404).json({ error: 'Order not found' })
+    if (orders[0].userId !== req.user.uid)
+      return res.status(403).json({ error: 'This is not your order' })
+    if (orders[0].status !== 'delivered')
+      return res.status(400).json({ error: 'You can only review delivered orders' })
+
+    // Verify product was in this order
+    const [items] = await pool.execute(
+      'SELECT id FROM order_items WHERE orderId = ? AND productId = ?', [orderId, productId]
+    )
+    if (!items.length)
+      return res.status(400).json({ error: 'This product was not in your order' })
+
+    // Insert (or replace if re-submitting)
+    await pool.execute(
+      `INSERT INTO reviews (productId, orderId, userId, userName, rating, comment)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE rating = VALUES(rating), comment = VALUES(comment)`,
+      [productId, orderId, req.user.uid, req.user.name || '', rating, comment || '']
+    )
+
+    const [rows] = await pool.execute(
+      'SELECT * FROM reviews WHERE orderId = ? AND productId = ? AND userId = ?',
+      [orderId, productId, req.user.uid]
+    )
+    res.json(rows[0])
   } catch (err) {
     res.status(500).json({ error: err.message })
   }

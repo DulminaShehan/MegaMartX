@@ -4,11 +4,30 @@
 
 import { useState, useEffect } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
-import { FiShoppingCart, FiArrowLeft, FiStar, FiTruck, FiRefreshCw, FiShield, FiMinus, FiPlus } from 'react-icons/fi'
-import { getProductById } from '../firebase/firestore'
+import { FiShoppingCart, FiArrowLeft, FiStar, FiTruck, FiRefreshCw, FiShield, FiMinus, FiPlus, FiUser } from 'react-icons/fi'
+import { getProductById, getProductReviews } from '../firebase/firestore'
 import { useCart } from '../context/CartContext'
 import { formatPrice, imgFallback, formatDate } from '../utils/helpers'
 import { FullPageLoader } from '../components/Loader'
+
+const StarRow = ({ value, onChange, size = 26 }) => (
+  <div style={{ display: 'flex', gap: '4px' }}>
+    {[1,2,3,4,5].map(n => (
+      <button
+        key={n}
+        type="button"
+        onClick={() => onChange && onChange(n)}
+        style={{ background: 'none', border: 'none', cursor: onChange ? 'pointer' : 'default', padding: '2px' }}
+      >
+        <FiStar
+          size={size}
+          fill={n <= value ? '#f59e0b' : 'none'}
+          color={n <= value ? '#f59e0b' : '#ddd'}
+        />
+      </button>
+    ))}
+  </div>
+)
 
 const ProductDetails = () => {
   const { id } = useParams()
@@ -19,12 +38,24 @@ const ProductDetails = () => {
   const [qty, setQty] = useState(1)
   const [imgErr, setImgErr] = useState(false)
 
+  const [reviewData, setReviewData] = useState(null)   // { reviews, avgRating, total }
+  const [reviewsLoading, setReviewsLoading] = useState(false)
+
   useEffect(() => {
     getProductById(id)
       .then(data => { if (!data) navigate('/shop', { replace: true }); else setProduct(data) })
       .catch(() => navigate('/shop', { replace: true }))
       .finally(() => setLoading(false))
   }, [id, navigate])
+
+  useEffect(() => {
+    if (!id) return
+    setReviewsLoading(true)
+    getProductReviews(id)
+      .then(setReviewData)
+      .catch(() => {})
+      .finally(() => setReviewsLoading(false))
+  }, [id])
 
   if (loading) return <FullPageLoader />
   if (!product) return null
@@ -49,7 +80,7 @@ const ProductDetails = () => {
         </div>
 
         <div style={s.layout}>
-          {/* Image */}
+          {/* Image — */}
           <div style={s.imgCol}>
             <div style={s.imgBox}>
               <img
@@ -132,6 +163,55 @@ const ProductDetails = () => {
             <p style={s.listedDate}>Listed on {formatDate(product.createdAt)}</p>
           </div>
         </div>
+
+        {/* ── Reviews section ── */}
+        <div style={s.reviewsSection}>
+          <div style={s.reviewsHeader}>
+            <div>
+              <h2 style={s.reviewsTitle}>Customer Reviews</h2>
+              {reviewData && reviewData.total > 0 && (
+                <div style={s.ratingOverview}>
+                  <span style={s.bigRating}>{reviewData.avgRating?.toFixed(1)}</span>
+                  <div>
+                    <StarRow value={Math.round(reviewData.avgRating || 0)} />
+                    <p style={s.totalReviews}>{reviewData.total} review{reviewData.total !== 1 ? 's' : ''}</p>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {reviewsLoading && <p style={s.reviewMsg}>Loading reviews…</p>}
+
+          {!reviewsLoading && (!reviewData || reviewData.total === 0) && (
+            <div style={s.noReviews}>
+              <FiStar size={32} color="#ddd" />
+              <p style={{ margin: '8px 0 0', color: '#aaa', fontSize: '14px' }}>No reviews yet. Be the first to review after delivery!</p>
+            </div>
+          )}
+
+          {!reviewsLoading && reviewData && reviewData.reviews.length > 0 && (
+            <div style={s.reviewList}>
+              {reviewData.reviews.map(r => (
+                <div key={r.id} style={s.reviewCard}>
+                  <div style={s.reviewTop}>
+                    <div style={s.reviewAvatar}>{r.userName?.[0]?.toUpperCase() || <FiUser size={14} />}</div>
+                    <div style={{ flex: 1 }}>
+                      <div style={s.reviewMeta}>
+                        <span style={s.reviewerName}>{r.userName || 'Customer'}</span>
+                        <span style={s.reviewDate}>{formatDate(r.createdAt)}</span>
+                      </div>
+                      <StarRow value={r.rating} size={14} />
+                    </div>
+                    <div style={s.ratingBadge}>{r.rating}.0</div>
+                  </div>
+                  {r.comment && <p style={s.reviewComment}>{r.comment}</p>}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
       </div>
     </div>
   )
@@ -238,6 +318,53 @@ const s = {
   },
   trustItem: { display: 'flex', alignItems: 'center', gap: '6px', color: '#555', fontSize: '12px' },
   listedDate: { color: '#aaa', fontSize: '12px', margin: 0 },
+
+  // Reviews
+  reviewsSection: {
+    marginTop: '56px',
+    borderTop: '2px solid #e3f2fd',
+    paddingTop: '36px',
+  },
+  reviewsHeader: {
+    display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
+    marginBottom: '24px', flexWrap: 'wrap', gap: '12px',
+  },
+  reviewsTitle: { color: '#000', fontSize: '20px', fontWeight: 700, margin: '0 0 12px' },
+  ratingOverview: { display: 'flex', alignItems: 'center', gap: '14px' },
+  bigRating: { fontSize: '48px', fontWeight: 800, color: '#f59e0b', lineHeight: 1 },
+  totalReviews: { color: '#888', fontSize: '12px', margin: '4px 0 0' },
+  reviewMsg:  { color: '#aaa', fontSize: '14px' },
+  noReviews: {
+    display: 'flex', flexDirection: 'column', alignItems: 'center',
+    padding: '40px', background: '#f8faff',
+    border: '1.5px dashed #e3f2fd', borderRadius: '14px', textAlign: 'center',
+  },
+  reviewList: { display: 'flex', flexDirection: 'column', gap: '14px' },
+  reviewCard: {
+    background: '#fff', border: '1.5px solid #e3f2fd',
+    borderRadius: '14px', padding: '18px 20px',
+    boxShadow: '0 2px 10px rgba(33,150,243,0.04)',
+  },
+  reviewTop: { display: 'flex', alignItems: 'flex-start', gap: '12px', marginBottom: '10px' },
+  reviewAvatar: {
+    width: '38px', height: '38px', borderRadius: '50%',
+    background: 'linear-gradient(135deg, #2196F3, #1565C0)',
+    color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
+    fontSize: '15px', fontWeight: 700, flexShrink: 0,
+  },
+  reviewMeta: { display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '4px', flexWrap: 'wrap' },
+  reviewerName: { color: '#000', fontSize: '14px', fontWeight: 600 },
+  reviewDate:   { color: '#aaa', fontSize: '12px' },
+  ratingBadge: {
+    background: '#fff3cd', color: '#856404',
+    border: '1px solid #ffc107',
+    borderRadius: '8px', padding: '3px 9px',
+    fontSize: '13px', fontWeight: 700, flexShrink: 0,
+  },
+  reviewComment: {
+    color: '#444', fontSize: '14px', lineHeight: 1.7,
+    margin: 0, paddingLeft: '50px',
+  },
 }
 
 export default ProductDetails
