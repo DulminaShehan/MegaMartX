@@ -83,14 +83,25 @@ const Navbar = () => {
             {cartCount > 0 && <span style={s.badge}>{cartCount}</span>}
           </Link>
 
+          {/* Admin quick-access button — only shown to admins */}
+          {currentUser && isAdmin && (
+            <Link to="/admin" style={s.adminNavBtn}>
+              <FiShield size={14} />
+              Admin
+            </Link>
+          )}
+
           {/* Logged-in user dropdown */}
           {currentUser ? (
             <div style={s.userMenu}>
               <button style={s.userBtn} onClick={() => setDropdownOpen(p => !p)}>
-                {userProfile?.photoURL
-                  ? <img src={userProfile.photoURL} alt="avatar" style={s.avatar} />
-                  : <div style={s.avatarPlaceholder}>{userProfile?.name?.[0]?.toUpperCase() || <FiUser size={14} />}</div>
-                }
+                <div style={{ position: 'relative', flexShrink: 0 }}>
+                  {userProfile?.photoURL
+                    ? <img src={userProfile.photoURL} alt="avatar" style={s.avatar} />
+                    : <div style={s.avatarPlaceholder}>{userProfile?.name?.[0]?.toUpperCase() || <FiUser size={14} />}</div>
+                  }
+                  {isAdmin && <span style={s.adminDot} title="Admin" />}
+                </div>
                 <span style={s.userName}>{userProfile?.name?.split(' ')[0] || 'Account'}</span>
                 <FiChevronDown size={13} color="#555" />
               </button>
@@ -113,14 +124,23 @@ const Navbar = () => {
                       </Link>
                     )}
                     {isAdmin && (
-                      <Link to="/admin" style={s.dropItem} onClick={() => setDropdownOpen(false)}>
-                        <FiShield size={15} /> Admin Panel
-                      </Link>
-                    )}
-                    {isAdmin && (
-                      <Link to="/admin?section=apikeys" style={s.dropItem} onClick={() => setDropdownOpen(false)}>
-                        <FiKey size={15} /> API Keys
-                      </Link>
+                      <>
+                        <div style={s.dropSectionLabel}>
+                          <FiShield size={11} /> Admin
+                        </div>
+                        <Link to="/admin" style={s.dropItemAdmin} onClick={() => setDropdownOpen(false)}>
+                          <FiShield size={15} /> Dashboard
+                        </Link>
+                        <Link to="/admin?section=users" style={s.dropItemAdmin} onClick={() => setDropdownOpen(false)}>
+                          <FiUser size={15} /> Users
+                        </Link>
+                        <Link to="/admin?section=orders" style={s.dropItemAdmin} onClick={() => setDropdownOpen(false)}>
+                          <FiPackage size={15} /> Orders
+                        </Link>
+                        <Link to="/admin?section=apikeys" style={s.dropItemAdmin} onClick={() => setDropdownOpen(false)}>
+                          <FiKey size={15} /> API Keys
+                        </Link>
+                      </>
                     )}
                     <div style={s.dropDivider} />
                     <button style={s.dropLogout} onClick={handleLogout}>
@@ -174,8 +194,23 @@ const Navbar = () => {
             <>
               <Link to="/orders" style={s.mobileLink} onClick={() => setMenuOpen(false)}>My Orders</Link>
               {isSeller && <Link to="/seller" style={s.mobileLink} onClick={() => setMenuOpen(false)}>Seller Dashboard</Link>}
-              {isAdmin && <Link to="/admin" style={s.mobileLink} onClick={() => setMenuOpen(false)}>Admin Panel</Link>}
-              {isAdmin && <Link to="/admin?section=apikeys" style={s.mobileLink} onClick={() => setMenuOpen(false)}>API Keys</Link>}
+              {isAdmin && (
+                <>
+                  <div style={s.mobileAdminLabel}><FiShield size={13} /> Admin</div>
+                  <Link to="/admin" style={s.mobileAdminLink} onClick={() => setMenuOpen(false)}>
+                    <FiShield size={14} /> Dashboard
+                  </Link>
+                  <Link to="/admin?section=users" style={s.mobileAdminLink} onClick={() => setMenuOpen(false)}>
+                    <FiUser size={14} /> Users
+                  </Link>
+                  <Link to="/admin?section=orders" style={s.mobileAdminLink} onClick={() => setMenuOpen(false)}>
+                    <FiPackage size={14} /> Orders
+                  </Link>
+                  <Link to="/admin?section=apikeys" style={s.mobileAdminLink} onClick={() => setMenuOpen(false)}>
+                    <FiKey size={14} /> API Keys
+                  </Link>
+                </>
+              )}
               <button style={s.mobileLogout} onClick={handleLogout}>Logout</button>
             </>
           ) : (
@@ -367,6 +402,63 @@ const s = {
     textAlign: 'left',
   },
 
+  // Admin nav button (shown beside cart for admins)
+  adminNavBtn: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '5px',
+    padding: '6px 12px',
+    background: 'linear-gradient(135deg, #1565C0 0%, #2196F3 100%)',
+    color: '#fff',
+    borderRadius: '8px',
+    fontSize: '12px',
+    fontWeight: 700,
+    whiteSpace: 'nowrap',
+    boxShadow: '0 2px 8px rgba(21,101,192,0.3)',
+    letterSpacing: '0.2px',
+  },
+
+  // Admin dot indicator on avatar
+  adminDot: {
+    position: 'absolute',
+    bottom: '0px',
+    right: '0px',
+    width: '8px',
+    height: '8px',
+    borderRadius: '50%',
+    background: '#1565C0',
+    border: '1.5px solid #fff',
+  },
+
+  // Dropdown admin section label
+  dropSectionLabel: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    padding: '6px 16px 4px',
+    fontSize: '10px',
+    fontWeight: 800,
+    color: '#1565C0',
+    textTransform: 'uppercase',
+    letterSpacing: '0.8px',
+    background: '#e8f4fd',
+    borderBottom: '1px solid #bbdefb',
+    borderTop: '1px solid #e3f2fd',
+  },
+
+  // Admin-tinted dropdown items
+  dropItemAdmin: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '9px',
+    padding: '9px 16px',
+    color: '#1565C0',
+    fontSize: '13px',
+    borderBottom: '1px solid #f0f8ff',
+    background: '#fafcff',
+    transition: 'background .15s',
+  },
+
   // Auth buttons
   authBtns: { display: 'flex', gap: '8px' },
   loginBtn: {
@@ -427,6 +519,31 @@ const s = {
     borderBottom: '1px solid #f0f8ff',
   },
   mobileDivider: { borderTop: '1px solid #e3f2fd', margin: '6px 0' },
+
+  mobileAdminLabel: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    padding: '8px 8px 4px',
+    fontSize: '11px',
+    fontWeight: 800,
+    color: '#1565C0',
+    textTransform: 'uppercase',
+    letterSpacing: '0.8px',
+    marginTop: '6px',
+  },
+  mobileAdminLink: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '9px',
+    color: '#1565C0',
+    padding: '10px 8px 10px 20px',
+    fontSize: '14px',
+    fontWeight: 500,
+    borderBottom: '1px solid #f0f8ff',
+    background: '#fafcff',
+  },
+
   mobileLogout: {
     background: 'none',
     border: 'none',
