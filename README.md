@@ -1,175 +1,252 @@
-# 🛒 MegaMartX – Full Stack eCommerce Platform
+# 🛒 MegaMartX — Full Stack eCommerce Platform
 
-MegaMartX is a modern full-stack eCommerce web application built with React, Node.js, Express, and MySQL.  
-It includes role-based access (User, Seller, Admin), API key system, product reviews, and a complete shopping system.
+![React](https://img.shields.io/badge/Frontend-React-blue)
+![Node.js](https://img.shields.io/badge/Backend-Node.js-green)
+![Express](https://img.shields.io/badge/Framework-Express-black)
+![MySQL](https://img.shields.io/badge/Database-MySQL-orange)
+![JWT](https://img.shields.io/badge/Auth-JWT-red)
+![Status](https://img.shields.io/badge/Status-Active-success)
 
----
+A modern **Full-Stack eCommerce Platform** built using **React, Node.js, Express, and MySQL**, featuring:
 
-## 🚀 Features
-
-### 👤 User Features
-- Register / Login system (JWT Authentication)
-- Browse products
-- Add to cart
-- Place orders (Cash on Delivery / Card Payment)
-- View order history
-- Product rating & reviews (after delivery)
-
----
-
-### 🏪 Seller Features
-- Seller dashboard
-- Add / Edit / Delete products
-- Upload product images
-- Manage own products
-- View sales/orders
+- 👤 Multi-role Authentication (User / Seller / Admin)
+- 🛍 Complete Shopping System
+- 🔐 API Key Management
+- ⭐ Product Reviews & Ratings
+- 📊 Admin Analytics Dashboard
+- 📱 Responsive Modern UI
 
 ---
 
-### 🛠️ Admin Features
-- Admin dashboard with analytics
-- View total users, sellers, buyers
-- Manage all users
-- Create new admin accounts
-- API Key management system
-- Access external API system using keys
-- Role-based navigation system
+# ✨ Features
+
+## 👤 Customer Features
+- User Registration & Login (JWT)
+- Product Browsing
+- Search and Filtering
+- Shopping Cart
+- Checkout System
+- Order History
+- Delivery Tracking
+- Product Ratings & Reviews
 
 ---
 
-### 🔐 API Key System
-- Generate API keys for external access
-- Secure API routes using `X-API-Key`
-- Public API endpoints:
-  - `/api/v1/ping`
-  - `/api/v1/products`
-  - `/api/v1/orders`
+## 🏪 Seller Dashboard
+- Add Products
+- Edit/Delete Products
+- Upload Multiple Product Images
+- Manage Inventory
+- View Sales
+- Track Orders
 
 ---
 
-### ⭐ Product Reviews System
-- Users can review products after delivery only
-- Star rating system (1–5)
-- Prevent duplicate reviews
-- Review validation using order ownership
-- Product rating summary
+## 👑 Admin Dashboard
+- User Management
+- Seller Management
+- Create Admin Accounts
+- Dashboard Analytics
+- API Key Management
+- System Monitoring
+- Role-based Navigation
 
 ---
 
-### 🛒 Cart & Order System
-- Add to cart
-- Update quantity
-- Remove items
-- Checkout system
-- Order tracking
-- Delivery status system
+# 🔐 API Key System
+
+Supports secure external API access using `X-API-Key`.
+
+### Public API Endpoints
+```http
+GET /api/v1/ping
+GET /api/v1/products
+GET /api/v1/orders
+```
+
+Features:
+- Generate API Keys
+- Validate Keys
+- Protected Routes
+- External API Access
 
 ---
 
-## 🧱 Tech Stack
+# ⭐ Review System
+- 1–5 Star Ratings
+- Verified Purchase Reviews
+- Duplicate Review Prevention
+- Order Ownership Validation
+- Product Rating Summary
 
-### Frontend
+---
+
+# 🛒 Order System
+- Add to Cart
+- Update Quantities
+- Remove Items
+- Checkout
+- Track Orders
+- Delivery Status Updates
+
+---
+
+# 🧱 Tech Stack
+
+## Frontend
 - React
 - Axios
 - React Router
-- Modern UI (White + Light Blue Theme)
+- Responsive UI
 
-### Backend
+## Backend
 - Node.js
 - Express.js
 - JWT Authentication
 
-### Database
+## Database
 - MySQL
 
 ---
 
-## 🗄️ Database Tables
+# 🗄 Database Schema
+Tables Included:
 
-- users
-- products
-- cart
-- orders
-- order_items
-- reviews
-- api_keys
-
----
-
-## 🎨 UI Theme
-
-- Background: White (#FFFFFF)
-- Primary Color: Light Blue (#2196F3)
-- Text Color: Black (#000000)
-- Clean modern dashboard design
-- Responsive layout (mobile + desktop)
+```sql
+users
+products
+cart
+orders
+order_items
+reviews
+api_keys
+```
 
 ---
 
-## 🔐 Security Features
+# 🎨 UI Design
+Theme:
+- White `#FFFFFF`
+- Light Blue `#2196F3`
+- Black `#000000`
 
-- JWT authentication
-- Role-based access control
-- API key validation middleware
-- Protected admin routes
-- Order ownership validation
+Features:
+- Clean Dashboard Layout
+- Modern eCommerce UI
+- Mobile Responsive
 
 ---
 
-## 📦 Installation
+# 🔒 Security
+- JWT Authentication
+- Role-Based Access Control
+- Protected Routes
+- API Key Middleware
+- Order Ownership Validation
 
-### 1. Clone repository
+---
+
+# 📦 Installation
+
+## Clone Repository
 ```bash
 git clone https://github.com/your-username/megamartx.git
-2. Backend setup
+```
+
+## Backend Setup
+```bash
 cd backend
 npm install
 npm start
-3. Frontend setup
+```
+
+## Frontend Setup
+```bash
 cd frontend
 npm install
 npm run dev
-⚙️ Environment Variables
+```
 
-Create .env file:
+---
 
+# ⚙ Environment Variables
+
+Create `.env`
+
+```env
 DB_HOST=localhost
 DB_USER=root
 DB_PASSWORD=yourpassword
 DB_NAME=megamartx
 JWT_SECRET=your_secret_key
-📡 API Features
-Secure REST APIs
-API Key protected routes
-Admin-only endpoints
-Public product APIs
-👑 Admin Panel
+```
 
-Admin can:
+---
 
-View dashboard stats
-Manage users
-Create new admins
-Manage API keys
-Monitor system activity
-📸 Project Status
+# 📡 API Features
+- Secure REST APIs
+- Public Product APIs
+- Admin-only Endpoints
+- API Key Protected Routes
 
-✔ Auth System Completed
-✔ Seller Dashboard Completed
-✔ Cart & Orders Completed
-✔ Admin Panel Completed
-✔ API Key System Completed
-✔ Reviews System Completed
+---
 
-💡 Future Improvements
-Payment gateway integration (Stripe)
-Email notifications
-Real-time order tracking
-Advanced analytics dashboard
-👨‍💻 Developer
+# 📸 Project Status
 
-Built as a full-stack portfolio project for Fiverr and real-world eCommerce simulation.
+## Completed Modules
+- ✅ Authentication System
+- ✅ Seller Dashboard
+- ✅ Cart & Orders
+- ✅ Admin Panel
+- ✅ API Key System
+- ✅ Review System
 
-⭐ License
+---
 
-This project is for educational and portfolio purposes.
+# 🚀 Future Improvements
+- Stripe Payments
+- Wishlist System
+- Rewards System
+- Email Notifications
+- Real-time Order Tracking
+- Advanced Analytics
+- Recommendation Engine
+- Chat Support
+
+---
+
+# 🛣 Roadmap
+Phase 1
+- Recommendations
+- Chat
+- Order Tracking
+- Storefronts
+
+Phase 2
+- Rewards
+- Wishlist
+- Analytics
+
+---
+
+# 🤝 Contributing
+Contributions, ideas and improvements are welcome.
+
+```bash
+Fork → Create Branch → Commit → Push → Pull Request
+```
+
+---
+
+# 👨‍💻 Developer
+Built as a portfolio-grade full stack project for freelance and real-world eCommerce simulation.
+
+---
+
+# ⭐ Support
+If you like this project, give it a star ⭐
+
+---
+
+# 📄 License
+For educational and portfolio purposes.
