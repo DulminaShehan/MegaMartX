@@ -24,6 +24,11 @@ import Checkout          from './pages/Checkout'
 import OrderConfirmation from './pages/OrderConfirmation'
 import About             from './pages/About'
 import Contact           from './pages/Contact'
+import Messages          from './pages/Messages'
+import ChatWindow        from './pages/ChatWindow'
+import StoreFront        from './pages/StoreFront'
+import Wishlist          from './pages/Wishlist'
+import RewardsPage       from './pages/RewardsPage'
 
 // ── Error boundary catches any render crash ──────────────────
 class ErrorBoundary extends Component {
@@ -106,7 +111,7 @@ const App = () => (
                 <Route path="/login"       element={<Login />} />
                 <Route path="/register"         element={<Register />} />
                 <Route path="/seller-register" element={<SellerRegister />} />
-                <Route path="/admin-register"  element={<AdminRegister />} />
+                <Route path="/super-admin-create" element={<ProtectedRoute role="admin"><AdminRegister /></ProtectedRoute>} />
                 <Route path="/about"       element={<About />} />
                 <Route path="/contact"     element={<Contact />} />
 
@@ -115,6 +120,13 @@ const App = () => (
                 <Route path="/order-confirmation/:id"   element={<ProtectedRoute><OrderConfirmation /></ProtectedRoute>} />
                 <Route path="/orders"                   element={<ProtectedRoute><OrderHistory /></ProtectedRoute>} />
                 <Route path="/orders/:id"               element={<ProtectedRoute><OrderDetails /></ProtectedRoute>} />
+                <Route path="/messages"                 element={<ProtectedRoute><Messages /></ProtectedRoute>} />
+                <Route path="/messages/:convId"         element={<ProtectedRoute><ChatWindow /></ProtectedRoute>} />
+                <Route path="/wishlist"                 element={<ProtectedRoute><Wishlist /></ProtectedRoute>} />
+                <Route path="/rewards"                  element={<ProtectedRoute><RewardsPage /></ProtectedRoute>} />
+
+                {/* Public storefronts */}
+                <Route path="/store/:sellerUid"         element={<StoreFront />} />
 
                 {/* Sellers */}
                 <Route path="/seller" element={<ProtectedRoute role="seller"><SellerDashboard /></ProtectedRoute>} />

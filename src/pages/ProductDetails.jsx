@@ -4,11 +4,18 @@
 
 import { useState, useEffect } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
-import { FiShoppingCart, FiArrowLeft, FiStar, FiTruck, FiRefreshCw, FiShield, FiMinus, FiPlus, FiUser } from 'react-icons/fi'
-import { getProductById, getProductReviews } from '../firebase/firestore'
+import { FiShoppingCart, FiArrowLeft, FiStar, FiTruck, FiRefreshCw, FiShield, FiMinus, FiPlus, FiUser, FiMessageSquare, FiShoppingBag, FiHeart } from 'react-icons/fi'
+import {
+  getProductById, getProductReviews,
+  trackProductView, getSimilarProducts, startConversation,
+  checkWishlist, addToWishlist, removeFromWishlist,
+} from '../firebase/firestore'
 import { useCart } from '../context/CartContext'
+import { useAuth } from '../context/AuthContext'
 import { formatPrice, imgFallback, formatDate } from '../utils/helpers'
 import { FullPageLoader } from '../components/Loader'
+import RecommendationCarousel from '../components/RecommendationCarousel'
+import toast from 'react-hot-toast'
 
 const StarRow = ({ value, onChange, size = 26 }) => (
   <div style={{ display: 'flex', gap: '4px' }}>
@@ -30,23 +37,44 @@ const StarRow = ({ value, onChange, size = 26 }) => (
 )
 
 const ProductDetails = () => {
-  const { id } = useParams()
-  const navigate = useNavigate()
-  const { addToCart } = useCart()
-  const [product, setProduct] = useState(null)
-  const [loading, setLoading] = useState(true)
-  const [qty, setQty] = useState(1)
-  const [imgErr, setImgErr] = useState(false)
+  const { id }            = useParams()
+  const navigate          = useNavigate()
+  const { addToCart }     = useCart()
+  const { currentUser }   = useAuth()
 
-  const [reviewData, setReviewData] = useState(null)   // { reviews, avgRating, total }
+  const [product,        setProduct]        = useState(null)
+  const [loading,        setLoading]        = useState(true)
+  const [qty,            setQty]            = useState(1)
+  const [imgErr,         setImgErr]         = useState(false)
+  const [similar,        setSimilar]        = useState([])
+  const [similarLoad,    setSimilarLoad]    = useState(true)
+  const [msgBusy,        setMsgBusy]        = useState(false)
+
+  const [reviewData,     setReviewData]     = useState(null)
   const [reviewsLoading, setReviewsLoading] = useState(false)
+  const [wishlisted,     setWishlisted]     = useState(false)
+  const [wishBusy,       setWishBusy]       = useState(false)
 
   useEffect(() => {
     getProductById(id)
-      .then(data => { if (!data) navigate('/shop', { replace: true }); else setProduct(data) })
+      .then(data => {
+        if (!data) navigate('/shop', { replace: true })
+        else {
+          setProduct(data)
+          trackProductView(data.id, data.category)
+        }
+      })
       .catch(() => navigate('/shop', { replace: true }))
       .finally(() => setLoading(false))
   }, [id, navigate])
+
+  // Check wishlist status when user + product are known
+  useEffect(() => {
+    if (!currentUser || !id) return
+    checkWishlist(currentUser.uid, id)
+      .then(d => setWishlisted(d.wishlisted))
+      .catch(() => {})
+  }, [currentUser, id])
 
   useEffect(() => {
     if (!id) return
@@ -55,7 +83,47 @@ const ProductDetails = () => {
       .then(setReviewData)
       .catch(() => {})
       .finally(() => setReviewsLoading(false))
+
+    setSimilarLoad(true)
+    getSimilarProducts(id)
+      .then(setSimilar)
+      .catch(() => {})
+      .finally(() => setSimilarLoad(false))
   }, [id])
+
+  const handleToggleWishlist = async () => {
+    if (!currentUser) { toast.error('Login to save to wishlist'); return navigate('/login') }
+    setWishBusy(true)
+    try {
+      if (wishlisted) {
+        await removeFromWishlist(currentUser.uid, product.id)
+        setWishlisted(false)
+        toast.success('Removed from wishlist')
+      } else {
+        await addToWishlist(product.id, true)
+        setWishlisted(true)
+        toast.success('Saved to wishlist! We\'ll notify you on price drops.')
+      }
+    } catch { toast.error('Could not update wishlist') }
+    finally { setWishBusy(false) }
+  }
+
+  const handleMessageSeller = async () => {
+    if (!currentUser) { toast.error('Login to message seller'); return navigate('/login') }
+    if (!product) return
+    if (currentUser.uid === product.sellerUid) return toast.error("That's your own product")
+    setMsgBusy(true)
+    try {
+      const conv = await startConversation({
+        sellerId:     product.sellerUid,
+        sellerName:   product.sellerName,
+        productId:    product.id,
+        productTitle: product.title,
+      })
+      navigate(`/messages/${conv.id}`)
+    } catch { toast.error('Could not start conversation') }
+    finally { setMsgBusy(false) }
+  }
 
   if (loading) return <FullPageLoader />
   if (!product) return null
@@ -146,6 +214,22 @@ const ProductDetails = () => {
               </button>
             </div>
 
+            {/* Wishlist */}
+            <button
+              style={{
+                ...s.wishlistBtn,
+                background: wishlisted ? '#fff5f5' : '#f9fcff',
+                border: wishlisted ? '1.5px solid #ffcdd2' : '1.5px solid #e3f2fd',
+                color:  wishlisted ? '#e53935' : '#555',
+              }}
+              onClick={handleToggleWishlist}
+              disabled={wishBusy}
+            >
+              <FiHeart size={15} fill={wishlisted ? '#e53935' : 'none'} color={wishlisted ? '#e53935' : '#555'} />
+              {wishlisted ? 'Saved to Wishlist' : 'Add to Wishlist'}
+              {wishlisted && <span style={{ fontSize: '11px', color: '#888', marginLeft: '4px' }}>· Price alerts on</span>}
+            </button>
+
             {/* Trust */}
             <div style={s.trustRow}>
               {[
@@ -161,6 +245,22 @@ const ProductDetails = () => {
             </div>
 
             <p style={s.listedDate}>Listed on {formatDate(product.createdAt)}</p>
+
+            {/* Seller actions */}
+            <div style={s.sellerActions}>
+              {product.sellerUid && currentUser?.uid !== product.sellerUid && (
+                <button style={s.msgSellerBtn} onClick={handleMessageSeller} disabled={msgBusy}>
+                  <FiMessageSquare size={14} />
+                  {msgBusy ? 'Opening…' : 'Message Seller'}
+                </button>
+              )}
+              {product.sellerUid && (
+                <Link to={`/store/${product.sellerUid}`} style={s.viewStoreBtn}>
+                  <FiShoppingBag size={14} />
+                  View Store
+                </Link>
+              )}
+            </div>
           </div>
         </div>
 
@@ -213,6 +313,20 @@ const ProductDetails = () => {
         </div>
 
       </div>
+
+      {/* ── Similar Products ── */}
+      {(similar.length > 0 || similarLoad) && (
+        <div style={{ borderTop: '2px solid #e3f2fd', paddingTop: '8px' }}>
+          <RecommendationCarousel
+            title="Similar Products"
+            subtitle={product.category ? `More in ${product.category}` : 'You might also like'}
+            products={similar}
+            loading={similarLoad}
+            viewAllLink={`/shop?category=${encodeURIComponent(product.category)}`}
+          />
+        </div>
+      )}
+
     </div>
   )
 }
@@ -318,6 +432,28 @@ const s = {
   },
   trustItem: { display: 'flex', alignItems: 'center', gap: '6px', color: '#555', fontSize: '12px' },
   listedDate: { color: '#aaa', fontSize: '12px', margin: 0 },
+
+  wishlistBtn: {
+    display: 'inline-flex', alignItems: 'center', gap: '8px',
+    padding: '10px 18px', borderRadius: '10px',
+    fontSize: '13px', fontWeight: 600, cursor: 'pointer',
+    marginBottom: '4px', width: '100%', justifyContent: 'center',
+    transition: 'all .2s',
+  },
+
+  sellerActions: { display: 'flex', gap: '10px', flexWrap: 'wrap' },
+  msgSellerBtn: {
+    display: 'inline-flex', alignItems: 'center', gap: '7px',
+    padding: '10px 20px', background: '#f0f8ff', color: '#2196F3',
+    border: '1.5px solid #90caf9', borderRadius: '10px',
+    fontSize: '13px', fontWeight: 700, cursor: 'pointer',
+  },
+  viewStoreBtn: {
+    display: 'inline-flex', alignItems: 'center', gap: '7px',
+    padding: '10px 20px', background: '#fff', color: '#555',
+    border: '1.5px solid #ddd', borderRadius: '10px',
+    fontSize: '13px', fontWeight: 600,
+  },
 
   // Reviews
   reviewsSection: {

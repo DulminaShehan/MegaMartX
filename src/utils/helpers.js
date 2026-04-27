@@ -48,9 +48,11 @@ export const CATEGORIES = [
 
 /** Order status badge color map */
 export const STATUS_COLORS = {
-  pending: '#f59e0b',
-  processing: '#3b82f6',
-  shipped: '#8b5cf6',
-  delivered: '#10b981',
-  cancelled: '#ef4444',
+  pending:          '#f59e0b',
+  processing:       '#3b82f6',
+  packed:           '#06b6d4',
+  shipped:          '#8b5cf6',
+  out_for_delivery: '#f97316',
+  delivered:        '#10b981',
+  cancelled:        '#ef4444',
 }

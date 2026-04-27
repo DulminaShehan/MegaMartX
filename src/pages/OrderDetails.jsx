@@ -7,14 +7,26 @@ import { useParams, Link, useNavigate } from 'react-router-dom'
 import {
   FiArrowLeft, FiPackage, FiCalendar, FiHash,
   FiUser, FiMail, FiTruck, FiStar, FiCheck, FiEdit2,
+  FiClock, FiMapPin,
 } from 'react-icons/fi'
-import { getOrderById, submitReview, checkReviewed } from '../firebase/firestore'
+import { getOrderById, submitReview, checkReviewed, getOrderTracking } from '../firebase/firestore'
 import { useAuth } from '../context/AuthContext'
 import { formatPrice, formatDate, STATUS_COLORS, imgFallback } from '../utils/helpers'
 import { FullPageLoader } from '../components/Loader'
 import toast from 'react-hot-toast'
 
-const STATUS_STEPS = ['pending', 'processing', 'shipped', 'delivered']
+// 5-step tracking pipeline
+const TRACKING_STEPS = [
+  { key: 'pending',          label: 'Order Placed',     icon: '📋' },
+  { key: 'packed',           label: 'Packed',           icon: '📦' },
+  { key: 'shipped',          label: 'Shipped',          icon: '🚚' },
+  { key: 'out_for_delivery', label: 'Out for Delivery', icon: '🏠' },
+  { key: 'delivered',        label: 'Delivered',        icon: '✅' },
+]
+
+// Map legacy 'processing' to 'packed' position for display
+const normaliseStatus = (s) => s === 'processing' ? 'packed' : s
+const STEP_KEYS = TRACKING_STEPS.map(t => t.key)
 
 // ── Star selector ────────────────────────────────────────────
 const StarPicker = ({ value, onChange }) => (
@@ -124,20 +136,18 @@ const OrderDetails = () => {
   const { currentUser, isAdmin } = useAuth()
   const navigate                = useNavigate()
 
-  const [order,   setOrder]   = useState(null)
-  const [loading, setLoading] = useState(true)
+  const [order,    setOrder]    = useState(null)
+  const [loading,  setLoading]  = useState(true)
   const [notFound, setNotFound] = useState(false)
+  const [tracking, setTracking] = useState([])
 
   useEffect(() => {
     getOrderById(id)
       .then(data => {
         if (!data) { setNotFound(true); return }
-        // Security: regular users can only see their own orders
-        if (!isAdmin && data.userId !== currentUser?.uid) {
-          setNotFound(true)
-          return
-        }
+        if (!isAdmin && data.userId !== currentUser?.uid) { setNotFound(true); return }
         setOrder(data)
+        getOrderTracking(id).then(setTracking).catch(() => {})
       })
       .catch(() => setNotFound(true))
       .finally(() => setLoading(false))
@@ -154,9 +164,23 @@ const OrderDetails = () => {
     </div>
   )
 
-  const statusColor  = STATUS_COLORS[order.status] || '#888'
-  const stepIndex    = STATUS_STEPS.indexOf(order.status)
+  const statusColor  = STATUS_COLORS[order.status] || STATUS_COLORS['out_for_delivery'] || '#888'
+  const normStatus   = normaliseStatus(order.status)
+  const stepIndex    = STEP_KEYS.indexOf(normStatus)
   const isCancelled  = order.status === 'cancelled'
+
+  const statusLabel = (raw) => {
+    const map = {
+      pending:          'Pending',
+      processing:       'Processing',
+      packed:           'Packed',
+      shipped:          'Shipped',
+      out_for_delivery: 'Out for Delivery',
+      delivered:        'Delivered',
+      cancelled:        'Cancelled',
+    }
+    return map[raw] || raw
+  }
 
   return (
     <div style={s.page}>
@@ -182,22 +206,19 @@ const OrderDetails = () => {
             background: statusColor + '18',
             border:     `1px solid ${statusColor}44`,
           }}>
-            {order.status
-              ? order.status.charAt(0).toUpperCase() + order.status.slice(1)
-              : 'Pending'}
+            {statusLabel(order.status)}
           </span>
         </div>
 
-        {/* ── Progress tracker (hidden for cancelled) ── */}
+        {/* ── 5-step Progress Tracker (hidden for cancelled) ── */}
         {!isCancelled && (
           <div style={s.progressCard}>
             <div style={s.progressSteps}>
-              {STATUS_STEPS.map((step, i) => {
+              {TRACKING_STEPS.map((step, i) => {
                 const done    = i <= stepIndex
                 const current = i === stepIndex
                 return (
-                  <div key={step} style={s.stepWrap}>
-                    {/* Connector line */}
+                  <div key={step.key} style={s.stepWrap}>
                     {i > 0 && (
                       <div style={{
                         ...s.connector,
@@ -206,22 +227,58 @@ const OrderDetails = () => {
                     )}
                     <div style={{
                       ...s.stepDot,
-                      background: done ? '#2196F3' : '#e3f2fd',
+                      background: done ? (current ? '#fff' : '#2196F3') : '#e3f2fd',
                       border:     current ? '3px solid #2196F3' : '2px solid ' + (done ? '#2196F3' : '#bbdefb'),
-                      boxShadow:  current ? '0 0 0 4px rgba(33,150,243,0.15)' : 'none',
+                      boxShadow:  current ? '0 0 0 4px rgba(33,150,243,0.18)' : 'none',
                     }}>
-                      {done && !current && <span style={s.checkMark}>✓</span>}
+                      {done && !current
+                        ? <span style={s.checkMark}>✓</span>
+                        : <span style={{ fontSize: '14px' }}>{step.icon}</span>
+                      }
                     </div>
                     <p style={{
                       ...s.stepLabel,
                       color:      done ? '#2196F3' : '#aaa',
                       fontWeight: current ? 700 : 500,
                     }}>
-                      {step.charAt(0).toUpperCase() + step.slice(1)}
+                      {step.label}
                     </p>
                   </div>
                 )
               })}
+            </div>
+
+            {/* Estimated delivery */}
+            {order.deliveryDate && order.status !== 'delivered' && (
+              <div style={s.etaRow}>
+                <FiTruck size={13} color="#2196F3" />
+                <span style={s.etaText}>
+                  Estimated delivery: <strong>{formatDate(order.deliveryDate)}</strong>
+                </span>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── Tracking Timeline ── */}
+        {tracking.length > 0 && (
+          <div style={s.timelineCard}>
+            <h3 style={s.cardTitle}>
+              <FiClock size={15} style={{ verticalAlign: 'middle', marginRight: '7px', color: '#2196F3' }} />
+              Tracking History
+            </h3>
+            <div style={s.timeline}>
+              {[...tracking].reverse().map((event, i) => (
+                <div key={event.id} style={s.timelineItem}>
+                  <div style={{ ...s.timelineDot, background: i === 0 ? '#2196F3' : '#bbdefb' }} />
+                  {i < tracking.length - 1 && <div style={s.timelineLine} />}
+                  <div style={s.timelineContent}>
+                    <p style={s.timelineStatus}>{statusLabel(event.status)}</p>
+                    {event.note && <p style={s.timelineNote}>{event.note}</p>}
+                    <p style={s.timelineDate}>{formatDate(event.createdAt)}</p>
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         )}
@@ -371,21 +428,52 @@ const s = {
   // Progress tracker
   progressCard: {
     background: '#f0f8ff', border: '1.5px solid #e3f2fd',
-    borderRadius: '14px', padding: '24px 32px',
-    marginBottom: '24px',
+    borderRadius: '14px', padding: '24px 20px 18px',
+    marginBottom: '16px',
   },
   progressSteps: {
     display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0,
+    overflowX: 'auto',
   },
-  stepWrap:   { display: 'flex', flexDirection: 'column', alignItems: 'center', position: 'relative', flex: 1 },
-  connector:  { position: 'absolute', top: '15px', right: '50%', width: '100%', height: '3px', zIndex: 0 },
+  stepWrap:   { display: 'flex', flexDirection: 'column', alignItems: 'center', position: 'relative', flex: 1, minWidth: '60px' },
+  connector:  { position: 'absolute', top: '18px', right: '50%', width: '100%', height: '3px', zIndex: 0 },
   stepDot: {
-    width: '30px', height: '30px', borderRadius: '50%',
+    width: '36px', height: '36px', borderRadius: '50%',
     display: 'flex', alignItems: 'center', justifyContent: 'center',
     zIndex: 1, transition: 'all .3s',
   },
-  checkMark:  { color: '#fff', fontSize: '13px', fontWeight: 900 },
-  stepLabel:  { fontSize: '12px', marginTop: '8px', textAlign: 'center' },
+  checkMark:  { color: '#fff', fontSize: '14px', fontWeight: 900 },
+  stepLabel:  { fontSize: '11px', marginTop: '8px', textAlign: 'center', lineHeight: 1.3, maxWidth: '64px' },
+  etaRow: {
+    display: 'flex', alignItems: 'center', gap: '7px',
+    marginTop: '16px', paddingTop: '14px',
+    borderTop: '1px solid #e3f2fd',
+    justifyContent: 'center',
+  },
+  etaText: { color: '#555', fontSize: '13px' },
+
+  // Tracking timeline
+  timelineCard: {
+    background: '#fff', border: '1.5px solid #e3f2fd',
+    borderRadius: '14px', padding: '20px',
+    marginBottom: '16px',
+    boxShadow: '0 2px 12px rgba(33,150,243,0.06)',
+  },
+  timeline:     { display: 'flex', flexDirection: 'column', gap: 0, marginTop: '12px' },
+  timelineItem: { display: 'flex', gap: '14px', position: 'relative', paddingBottom: '18px' },
+  timelineDot: {
+    width: '12px', height: '12px', borderRadius: '50%',
+    flexShrink: 0, marginTop: '4px',
+  },
+  timelineLine: {
+    position: 'absolute', left: '5px', top: '16px',
+    width: '2px', height: 'calc(100% - 4px)',
+    background: '#e3f2fd',
+  },
+  timelineContent: { flex: 1 },
+  timelineStatus:  { color: '#000', fontSize: '13px', fontWeight: 700, margin: '0 0 2px' },
+  timelineNote:    { color: '#555', fontSize: '12px', margin: '0 0 2px' },
+  timelineDate:    { color: '#aaa', fontSize: '11px', margin: 0 },
 
   // Grid layout
   grid: { display: 'grid', gridTemplateColumns: '1fr 300px', gap: '16px', alignItems: 'start' },

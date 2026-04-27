@@ -8,24 +8,54 @@ import { FiArrowRight } from 'react-icons/fi'
 import HeroSection from '../components/HeroSection'
 import CategoryBar from '../components/CategoryBar'
 import ProductCard from '../components/ProductCard'
+import RecommendationCarousel from '../components/RecommendationCarousel'
 import { FullPageLoader } from '../components/Loader'
-import { getAllProducts } from '../firebase/firestore'
+import {
+  getAllProducts, getPersonalisedRecs, getTrendingProducts,
+} from '../firebase/firestore'
+import { useAuth } from '../context/AuthContext'
 import { CATEGORIES } from '../utils/helpers'
 
-const getCatEmoji = (cat) => ({ Electronics:'📱', Fashion:'👗', 'Home & Living':'🏠', Sports:'⚽', Beauty:'💄', Books:'📚', Toys:'🧸', Grocery:'🛒', Automotive:'🚗' }[cat] || '🛍️')
+const getCatEmoji = (cat) => ({
+  Electronics:'📱', Fashion:'👗', 'Home & Living':'🏠',
+  Sports:'⚽', Beauty:'💄', Books:'📚', Toys:'🧸',
+  Grocery:'🛒', Automotive:'🚗',
+}[cat] || '🛍️')
 
 const Home = () => {
-  const [products, setProducts] = useState([])
-  const [filtered, setFiltered] = useState([])
+  const { currentUser } = useAuth()
+  const [products,    setProducts]    = useState([])
+  const [filtered,    setFiltered]    = useState([])
   const [selectedCat, setSelectedCat] = useState('All')
-  const [loading, setLoading] = useState(true)
+  const [loading,     setLoading]     = useState(true)
+
+  const [recs,        setRecs]        = useState([])
+  const [recsLoading, setRecsLoading] = useState(false)
+  const [trending,    setTrending]    = useState([])
+  const [trendLoad,   setTrendLoad]   = useState(true)
 
   useEffect(() => {
     getAllProducts()
       .then(data => { setProducts(data); setFiltered(data.slice(0, 12)) })
       .catch(console.error)
       .finally(() => setLoading(false))
+
+    // Trending — always visible
+    getTrendingProducts()
+      .then(setTrending)
+      .catch(() => {})
+      .finally(() => setTrendLoad(false))
   }, [])
+
+  // Personalised recs — only when logged in
+  useEffect(() => {
+    if (!currentUser) return
+    setRecsLoading(true)
+    getPersonalisedRecs(currentUser.uid)
+      .then(setRecs)
+      .catch(() => {})
+      .finally(() => setRecsLoading(false))
+  }, [currentUser])
 
   const handleCategory = (cat) => {
     setSelectedCat(cat)
@@ -37,7 +67,18 @@ const Home = () => {
       <HeroSection />
       <CategoryBar selected={selectedCat} onSelect={handleCategory} />
 
-      {/* Featured Products */}
+      {/* ── Personalised Recommendations (logged-in users with history) ── */}
+      {currentUser && (recs.length > 0 || recsLoading) && (
+        <RecommendationCarousel
+          title="Recommended for You"
+          subtitle="Based on your purchase &amp; browsing history"
+          products={recs}
+          loading={recsLoading}
+          viewAllLink="/shop"
+        />
+      )}
+
+      {/* ── Featured Products ── */}
       <section style={s.section}>
         <div style={s.container}>
           <div style={s.sectionHead}>
@@ -59,7 +100,18 @@ const Home = () => {
         </div>
       </section>
 
-      {/* CTA Banner */}
+      {/* ── Trending Now ── */}
+      <div style={{ background: '#f0f8ff' }}>
+        <RecommendationCarousel
+          title="Trending Now"
+          subtitle="Most viewed in the last 30 days"
+          products={trending}
+          loading={trendLoad}
+          viewAllLink="/shop"
+        />
+      </div>
+
+      {/* ── CTA Banner ── */}
       <section style={s.banner}>
         <div style={s.bannerInner}>
           <div style={s.bannerLeft}>
@@ -81,7 +133,7 @@ const Home = () => {
         </div>
       </section>
 
-      {/* Category Grid */}
+      {/* ── Category Grid ── */}
       <section style={{ ...s.section, background: '#f0f8ff' }}>
         <div style={s.container}>
           <div style={s.sectionHead}>
@@ -126,7 +178,6 @@ const s = {
   emptyText: { marginBottom: '12px', fontSize: '15px' },
   emptyLink: { color: '#2196F3', fontWeight: 600 },
 
-  // Banner
   banner: {
     background: 'linear-gradient(135deg, #1565C0 0%, #2196F3 60%, #42a5f5 100%)',
     padding: '56px 20px',
@@ -160,7 +211,6 @@ const s = {
   bannerStat: { color: '#fff', fontSize: '28px', fontWeight: 800, margin: '0 0 4px' },
   bannerStatLabel: { color: 'rgba(255,255,255,0.8)', fontSize: '13px', margin: 0 },
 
-  // Categories
   catGrid: {
     display: 'grid',
     gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))',

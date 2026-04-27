@@ -138,3 +138,85 @@ export const checkReviewed = (productId, orderId) =>
 
 /** Submit a review */
 export const submitReview = (data) => api('POST', '/api/reviews', data)
+
+// ─── RECOMMENDATIONS ──────────────────────────────────────────
+
+export const trackProductView = (productId, category) =>
+  api('POST', '/api/recommendations/view', { productId, category }).catch(() => null)
+
+export const getSimilarProducts = (productId) =>
+  api('GET', `/api/recommendations/similar/${encodeURIComponent(productId)}`)
+
+export const getPersonalisedRecs = (uid) =>
+  api('GET', `/api/recommendations/user/${encodeURIComponent(uid)}`)
+
+export const getTrendingProducts = () =>
+  api('GET', '/api/recommendations/trending')
+
+// ─── CHAT ────────────────────────────────────────────────────
+
+export const startConversation = (data) =>
+  api('POST', '/api/conversations', data)
+
+export const getUserConversations = (uid) =>
+  api('GET', `/api/conversations/user/${encodeURIComponent(uid)}`)
+
+export const getConversationMessages = (convId) =>
+  api('GET', `/api/conversations/${encodeURIComponent(convId)}/messages`)
+
+export const sendMessage = (convId, text) =>
+  api('POST', `/api/conversations/${encodeURIComponent(convId)}/messages`, { text })
+
+// ─── ORDER TRACKING ──────────────────────────────────────────
+
+export const getOrderTracking = (orderId) =>
+  api('GET', `/api/orders/${encodeURIComponent(orderId)}/tracking`)
+
+// ─── STOREFRONTS ─────────────────────────────────────────────
+
+export const getStoreProfile = (sellerUid) =>
+  api('GET', `/api/stores/${encodeURIComponent(sellerUid)}`)
+
+export const updateStoreProfile = (sellerUid, data) =>
+  api('PUT', `/api/stores/${encodeURIComponent(sellerUid)}`, data)
+
+export const toggleFollowStore = (sellerUid) =>
+  api('POST', `/api/stores/${encodeURIComponent(sellerUid)}/follow`, {})
+
+export const getFollowStatus = (sellerUid) =>
+  api('GET', `/api/stores/${encodeURIComponent(sellerUid)}/follow-status`)
+
+// ─── REWARDS ──────────────────────────────────────────────────
+
+export const getRewardBalance = (uid) =>
+  api('GET', `/api/rewards/${encodeURIComponent(uid)}`)
+
+// ─── WISHLIST ─────────────────────────────────────────────────
+
+export const getWishlist = (uid) =>
+  api('GET', `/api/wishlist/${encodeURIComponent(uid)}`)
+
+export const addToWishlist = (productId, notifyOnDrop = true) =>
+  api('POST', '/api/wishlist', { productId, notifyOnDrop: notifyOnDrop ? 1 : 0 })
+
+export const removeFromWishlist = (uid, productId) =>
+  api('DELETE', `/api/wishlist/${encodeURIComponent(uid)}/${encodeURIComponent(productId)}`)
+
+export const checkWishlist = (uid, productId) =>
+  api('GET', `/api/wishlist/check/${encodeURIComponent(uid)}/${encodeURIComponent(productId)}`)
+
+// ─── NOTIFICATIONS ────────────────────────────────────────────
+
+export const getNotifications = (uid) =>
+  api('GET', `/api/notifications/${encodeURIComponent(uid)}`)
+
+export const markNotificationsRead = (uid) =>
+  api('PUT', `/api/notifications/${encodeURIComponent(uid)}/read-all`, {})
+
+export const deleteNotification = (uid, id) =>
+  api('DELETE', `/api/notifications/${encodeURIComponent(uid)}/${id}`)
+
+// ─── SELLER ANALYTICS ─────────────────────────────────────────
+
+export const getSellerAnalytics = (uid) =>
+  api('GET', `/api/analytics/seller/${encodeURIComponent(uid)}`)

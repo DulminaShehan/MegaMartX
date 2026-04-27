@@ -14,11 +14,11 @@ import { Elements, CardElement, useStripe, useElements } from '@stripe/react-str
 import {
   FiArrowLeft, FiMapPin, FiPhone, FiUser,
   FiCreditCard, FiTruck, FiLock, FiShoppingBag,
-  FiCheckCircle, FiAlertCircle,
+  FiCheckCircle, FiAlertCircle, FiStar,
 } from 'react-icons/fi'
 import { useCart }  from '../context/CartContext'
 import { useAuth }  from '../context/AuthContext'
-import { placeOrder } from '../firebase/firestore'
+import { placeOrder, getRewardBalance } from '../firebase/firestore'
 import { formatPrice } from '../utils/helpers'
 import toast from 'react-hot-toast'
 
@@ -67,10 +67,20 @@ const CheckoutForm = () => {
   const navigate = useNavigate()
 
   // ── Pricing ─────────────────────────────────────────────
-  const shipping     = cartTotal > 50 ? 0 : 4.99
-  const tax          = +(cartTotal * 0.08).toFixed(2)
-  const grand        = +(cartTotal + shipping + tax).toFixed(2)
-  const deliveryDate = getDeliveryDate()
+  const shipping       = cartTotal > 50 ? 0 : 4.99
+  const tax            = +(cartTotal * 0.08).toFixed(2)
+  const deliveryDate   = getDeliveryDate()
+
+  // ── Reward points state ──────────────────────────────────
+  const [rewardBalance,   setRewardBalance]   = useState(0)
+  const [redeemInput,     setRedeemInput]     = useState('')
+  const [appliedPoints,   setAppliedPoints]   = useState(0)
+
+  const pointsDiscount = +(appliedPoints / 100).toFixed(2)
+  const grand          = +(cartTotal + shipping + tax - pointsDiscount).toFixed(2)
+
+  // Max points the user can redeem: 50% of pre-discount total, capped at balance
+  const maxRedeemable  = Math.min(rewardBalance, Math.floor((cartTotal + shipping + tax) * 50))
 
   // ── Form state ───────────────────────────────────────────
   const [form, setForm] = useState({
@@ -92,6 +102,14 @@ const CheckoutForm = () => {
       phone:    prev.phone    || userProfile.phone || '',
     }))
   }, [userProfile])
+
+  // Load reward balance
+  useEffect(() => {
+    if (!currentUser) return
+    getRewardBalance(currentUser.uid)
+      .then(d => setRewardBalance(d.points || 0))
+      .catch(() => {})
+  }, [currentUser])
 
   // Redirect to cart if cart is empty
   useEffect(() => {
@@ -116,6 +134,23 @@ const CheckoutForm = () => {
     if (errors[name]) setErrors(prev => ({ ...prev, [name]: null }))
   }
 
+  // ── Points helpers ───────────────────────────────────────
+  const handleApplyPoints = () => {
+    const pts = parseInt(redeemInput) || 0
+    if (pts < 100)   { toast.error('Minimum redemption is 100 points'); return }
+    if (pts > maxRedeemable) {
+      toast.error(`You can redeem at most ${maxRedeemable} points on this order`)
+      return
+    }
+    setAppliedPoints(pts)
+    toast.success(`${pts} points applied — saving ${formatPrice(pts / 100)}!`)
+  }
+
+  const handleRemovePoints = () => {
+    setAppliedPoints(0)
+    setRedeemInput('')
+  }
+
   // ── Core: build and send the order ───────────────────────
   const submitOrder = async (paymentIntentId = '') => {
     const order = await placeOrder({
@@ -127,6 +162,7 @@ const CheckoutForm = () => {
       paymentMethod:   form.paymentMethod,
       deliveryDate:    isoDate(deliveryDate),
       paymentIntentId,
+      pointsRedeemed:  appliedPoints,
       items: cartItems.map(i => ({
         id:         i.id,
         title:      i.title,
@@ -365,6 +401,46 @@ const CheckoutForm = () => {
               )}
             </div>
 
+            {/* Reward Points */}
+            {rewardBalance > 0 && (
+              <div style={s.card}>
+                <h2 style={s.cardTitle}>
+                  <FiStar size={16} style={{ color: '#f59e0b' }} /> Reward Points
+                </h2>
+                <div style={s.rewardBal}>
+                  <span style={s.rewardPts}>⭐ {rewardBalance.toLocaleString()} pts</span>
+                  <span style={s.rewardVal}>≈ {formatPrice(rewardBalance / 100)} value</span>
+                </div>
+
+                {appliedPoints > 0 ? (
+                  <div style={s.appliedRow}>
+                    <span style={s.appliedText}>
+                      ✅ {appliedPoints} pts applied — <strong>{formatPrice(pointsDiscount)} off</strong>
+                    </span>
+                    <button style={s.removePointsBtn} onClick={handleRemovePoints}>Remove</button>
+                  </div>
+                ) : (
+                  <div style={s.redeemRow}>
+                    <input
+                      style={s.redeemInput}
+                      type="number"
+                      placeholder={`100 – ${maxRedeemable} pts`}
+                      value={redeemInput}
+                      min={100}
+                      max={maxRedeemable}
+                      step={100}
+                      onChange={e => setRedeemInput(e.target.value)}
+                    />
+                    <button style={s.applyBtn} onClick={handleApplyPoints}>Apply</button>
+                    <button style={s.useMaxBtn} onClick={() => setRedeemInput(String(maxRedeemable))}>
+                      Use Max
+                    </button>
+                  </div>
+                )}
+                <p style={s.redeemHint}>100 pts = $1 off · Max 50% of order value</p>
+              </div>
+            )}
+
             {/* Place Order CTA */}
             <button
               style={{
@@ -425,6 +501,14 @@ const CheckoutForm = () => {
                 <span style={{ ...s.priceVal, color: v === 'FREE' ? '#2e7d32' : '#000' }}>{v}</span>
               </div>
             ))}
+            {appliedPoints > 0 && (
+              <div style={s.priceRow}>
+                <span style={{ ...s.priceLabel, color: '#2e7d32' }}>⭐ Points Discount</span>
+                <span style={{ ...s.priceVal, color: '#2e7d32', fontWeight: 700 }}>
+                  -{formatPrice(pointsDiscount)}
+                </span>
+              </div>
+            )}
 
             <div style={s.divider} />
 
@@ -695,4 +779,44 @@ const s = {
   deliveryDate:  { color: '#000', fontSize: '13px', fontWeight: 700, margin: '3px 0 0' },
   freeShip:      { color: '#2e7d32', fontSize: '11px', margin: '5px 0 0', fontWeight: 600 },
   freeShipHint:  { color: '#888', fontSize: '11px', margin: '5px 0 0' },
+
+  // Reward points card
+  rewardBal: {
+    display: 'flex', alignItems: 'center', gap: '12px',
+    background: '#fffde7', border: '1px solid #fff176',
+    borderRadius: '10px', padding: '10px 14px', marginBottom: '14px',
+  },
+  rewardPts: { color: '#f57f17', fontSize: '15px', fontWeight: 800 },
+  rewardVal: { color: '#888', fontSize: '13px' },
+
+  redeemRow: { display: 'flex', gap: '8px', marginBottom: '8px' },
+  redeemInput: {
+    flex: 1, padding: '9px 12px',
+    border: '1.5px solid #e3f2fd', borderRadius: '10px',
+    background: '#f9fcff', color: '#000', fontSize: '14px',
+    outline: 'none', boxSizing: 'border-box',
+  },
+  applyBtn: {
+    padding: '9px 16px', background: '#2196F3', color: '#fff',
+    border: 'none', borderRadius: '10px', fontWeight: 700,
+    fontSize: '13px', cursor: 'pointer', flexShrink: 0,
+  },
+  useMaxBtn: {
+    padding: '9px 12px', background: '#e3f2fd', color: '#2196F3',
+    border: 'none', borderRadius: '10px', fontWeight: 700,
+    fontSize: '13px', cursor: 'pointer', flexShrink: 0,
+  },
+
+  appliedRow: {
+    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+    background: '#e8f5e9', border: '1px solid #a5d6a7',
+    borderRadius: '10px', padding: '10px 14px', marginBottom: '8px',
+  },
+  appliedText:    { color: '#2e7d32', fontSize: '13px' },
+  removePointsBtn: {
+    background: 'none', border: 'none', cursor: 'pointer',
+    color: '#e53935', fontSize: '12px', fontWeight: 600,
+  },
+
+  redeemHint: { color: '#aaa', fontSize: '11px', margin: 0 },
 }

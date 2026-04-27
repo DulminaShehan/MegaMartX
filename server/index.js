@@ -288,6 +288,148 @@ const initDB = async () => {
       )
     `)
 
+    // ── Migrate: expand orders status ENUM for live tracking ─────────────
+    try {
+      await conn.execute(`
+        ALTER TABLE orders MODIFY COLUMN status
+        ENUM('pending','processing','packed','shipped','out_for_delivery','delivered','cancelled')
+        DEFAULT 'pending'
+      `)
+    } catch (_) { /* already expanded */ }
+
+    // Product views — recommendation engine
+    await conn.execute(`
+      CREATE TABLE IF NOT EXISTS product_views (
+        id        INT AUTO_INCREMENT PRIMARY KEY,
+        userId    VARCHAR(128) DEFAULT '',
+        productId VARCHAR(36)  NOT NULL,
+        category  VARCHAR(255) DEFAULT '',
+        viewedAt  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_pv_user    (userId),
+        INDEX idx_pv_product (productId)
+      )
+    `)
+
+    // Conversations — buyer ↔ seller messaging
+    await conn.execute(`
+      CREATE TABLE IF NOT EXISTS conversations (
+        id           VARCHAR(36)  PRIMARY KEY,
+        buyerId      VARCHAR(128) NOT NULL,
+        buyerName    VARCHAR(255) DEFAULT '',
+        sellerId     VARCHAR(128) NOT NULL,
+        sellerName   VARCHAR(255) DEFAULT '',
+        productId    VARCHAR(36)  DEFAULT '',
+        productTitle VARCHAR(500) DEFAULT '',
+        lastMessage  TEXT,
+        lastSenderId VARCHAR(128) DEFAULT '',
+        updatedAt    TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        createdAt    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_conv (buyerId, sellerId, productId),
+        INDEX idx_conv_buyer  (buyerId),
+        INDEX idx_conv_seller (sellerId)
+      )
+    `)
+
+    // Messages
+    await conn.execute(`
+      CREATE TABLE IF NOT EXISTS messages (
+        id             INT AUTO_INCREMENT PRIMARY KEY,
+        conversationId VARCHAR(36)  NOT NULL,
+        senderId       VARCHAR(128) NOT NULL,
+        senderName     VARCHAR(255) DEFAULT '',
+        text           TEXT NOT NULL,
+        createdAt      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_msg_conv (conversationId),
+        FOREIGN KEY (conversationId) REFERENCES conversations(id) ON DELETE CASCADE
+      )
+    `)
+
+    // Order tracking events
+    await conn.execute(`
+      CREATE TABLE IF NOT EXISTS order_tracking (
+        id        INT AUTO_INCREMENT PRIMARY KEY,
+        orderId   VARCHAR(36)  NOT NULL,
+        status    VARCHAR(50)  NOT NULL,
+        note      TEXT,
+        updatedBy VARCHAR(128) DEFAULT '',
+        createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_ot_order (orderId)
+      )
+    `)
+
+    // Seller profiles — storefront extra data
+    await conn.execute(`
+      CREATE TABLE IF NOT EXISTS seller_profiles (
+        sellerUid VARCHAR(128) PRIMARY KEY,
+        bio       TEXT,
+        bannerUrl TEXT,
+        location  VARCHAR(255) DEFAULT '',
+        createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      )
+    `)
+
+    // Store follows
+    await conn.execute(`
+      CREATE TABLE IF NOT EXISTS store_follows (
+        buyerId    VARCHAR(128) NOT NULL,
+        sellerUid  VARCHAR(128) NOT NULL,
+        followedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (buyerId, sellerUid)
+      )
+    `)
+
+    // Rewards wallet — 100 points = $1
+    await conn.execute(`
+      CREATE TABLE IF NOT EXISTS rewards (
+        userId VARCHAR(128) PRIMARY KEY,
+        points INT DEFAULT 0
+      )
+    `)
+
+    // Points transaction log
+    await conn.execute(`
+      CREATE TABLE IF NOT EXISTS points_transactions (
+        id          INT AUTO_INCREMENT PRIMARY KEY,
+        userId      VARCHAR(128) NOT NULL,
+        type        ENUM('earned','redeemed') NOT NULL,
+        points      INT NOT NULL,
+        description VARCHAR(500) DEFAULT '',
+        orderId     VARCHAR(36) DEFAULT '',
+        createdAt   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_pt_user (userId)
+      )
+    `)
+
+    // Wishlists
+    await conn.execute(`
+      CREATE TABLE IF NOT EXISTS wishlists (
+        id           INT AUTO_INCREMENT PRIMARY KEY,
+        userId       VARCHAR(128) NOT NULL,
+        productId    VARCHAR(36)  NOT NULL,
+        notifyOnDrop TINYINT DEFAULT 1,
+        addedAt      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_wl (userId, productId),
+        INDEX idx_wl_user    (userId),
+        INDEX idx_wl_product (productId)
+      )
+    `)
+
+    // In-app notifications (price drop, back-in-stock, etc.)
+    await conn.execute(`
+      CREATE TABLE IF NOT EXISTS notifications (
+        id        INT AUTO_INCREMENT PRIMARY KEY,
+        userId    VARCHAR(128) NOT NULL,
+        type      VARCHAR(50) DEFAULT 'info',
+        title     VARCHAR(255) DEFAULT '',
+        message   TEXT,
+        productId VARCHAR(36) DEFAULT '',
+        isRead    TINYINT DEFAULT 0,
+        createdAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_notif_user (userId)
+      )
+    `)
+
     console.log('✅ MySQL tables ready')
   } finally {
     conn.release()
@@ -511,13 +653,15 @@ app.get('/api/products/:id', async (req, res) => {
   }
 })
 
-// PUT /api/products/:id — update product
+// PUT /api/products/:id — update product (triggers price-drop notifications)
 app.put('/api/products/:id', async (req, res) => {
   const {
     title, description = '', brand = '', category = '', price,
     originalPrice, discount = 0, stock = 0, imageUrl = '', imagePath = '',
   } = req.body
   try {
+    const [oldRows] = await pool.execute('SELECT price FROM products WHERE id = ?', [req.params.id])
+
     await pool.execute(
       `UPDATE products SET
         title=?, description=?, brand=?, category=?, price=?,
@@ -527,6 +671,26 @@ app.put('/api/products/:id', async (req, res) => {
        originalPrice ?? price, discount, stock, imageUrl, imagePath,
        req.params.id]
     )
+
+    // Notify wishlist watchers if price dropped
+    if (oldRows.length && parseFloat(price) < parseFloat(oldRows[0].price)) {
+      const [watchers] = await pool.execute(
+        'SELECT userId FROM wishlists WHERE productId = ? AND notifyOnDrop = 1',
+        [req.params.id]
+      )
+      const newP = parseFloat(price).toFixed(2)
+      const oldP = parseFloat(oldRows[0].price).toFixed(2)
+      for (const w of watchers) {
+        await pool.execute(
+          `INSERT INTO notifications (userId, type, title, message, productId)
+           VALUES (?, 'price_drop', ?, ?, ?)`,
+          [w.userId, '💸 Price Drop!',
+           `"${title}" dropped from $${oldP} → $${newP}`,
+           req.params.id]
+        )
+      }
+    }
+
     const [rows] = await pool.execute('SELECT * FROM products WHERE id = ?', [req.params.id])
     res.json(rows[0])
   } catch (err) {
@@ -573,6 +737,7 @@ app.post('/api/orders', async (req, res) => {
     // Checkout fields
     address = '', phone = '', paymentMethod = 'COD',
     deliveryDate = null, paymentIntentId = '',
+    pointsRedeemed = 0,
   } = req.body
 
   // Validate required checkout fields
@@ -610,7 +775,48 @@ app.post('/api/orders', async (req, res) => {
       )
     }
 
+    await conn.execute(
+      'INSERT INTO order_tracking (orderId, status, note, updatedBy) VALUES (?, ?, ?, ?)',
+      [id, 'pending', 'Order placed', userId]
+    )
+
+    // Redeem loyalty points if requested
+    const pts = parseInt(pointsRedeemed) || 0
+    if (pts > 0 && userId) {
+      const [balRows] = await conn.execute(
+        'SELECT points FROM rewards WHERE userId = ?', [userId]
+      )
+      const currentPoints = balRows.length ? balRows[0].points : 0
+      if (currentPoints < pts)
+        throw new Error(`Insufficient reward points (have ${currentPoints}, tried to redeem ${pts})`)
+      await conn.execute(
+        `INSERT INTO rewards (userId, points) VALUES (?, 0)
+         ON DUPLICATE KEY UPDATE points = points - ?`,
+        [userId, pts]
+      )
+      await conn.execute(
+        `INSERT INTO points_transactions (userId, type, points, description, orderId)
+         VALUES (?, 'redeemed', ?, ?, ?)`,
+        [userId, pts, `Redeemed for order #${id.slice(-8)}`, id]
+      )
+    }
+
     await conn.commit()
+
+    // Earn loyalty points after commit: 1 pt per $1 spent
+    const earnedPoints = Math.floor(Number(total) || 0)
+    if (earnedPoints > 0 && userId) {
+      await pool.execute(
+        `INSERT INTO rewards (userId, points) VALUES (?, ?)
+         ON DUPLICATE KEY UPDATE points = points + ?`,
+        [userId, earnedPoints, earnedPoints]
+      )
+      await pool.execute(
+        `INSERT INTO points_transactions (userId, type, points, description, orderId)
+         VALUES (?, 'earned', ?, ?, ?)`,
+        [userId, earnedPoints, `Earned from order #${id.slice(-8)}`, id]
+      )
+    }
 
     const [rows] = await pool.execute('SELECT * FROM orders WHERE id = ?', [id])
     const [itemRows] = await pool.execute('SELECT * FROM order_items WHERE orderId = ?', [id])
@@ -668,12 +874,19 @@ app.get('/api/orders/seller/:uid', async (req, res) => {
   }
 })
 
-// PUT /api/orders/:id/status — update status
-app.put('/api/orders/:id/status', async (req, res) => {
-  const { status } = req.body
+// PUT /api/orders/:id/status — update status + log tracking event
+app.put('/api/orders/:id/status', requireAuth, async (req, res) => {
+  const { status, note = '' } = req.body
   if (!status) return res.status(400).json({ error: 'status required' })
+  const valid = ['pending','processing','packed','shipped','out_for_delivery','delivered','cancelled']
+  if (!valid.includes(status))
+    return res.status(400).json({ error: `status must be one of: ${valid.join(', ')}` })
   try {
     await pool.execute('UPDATE orders SET status = ? WHERE id = ?', [status, req.params.id])
+    await pool.execute(
+      'INSERT INTO order_tracking (orderId, status, note, updatedBy) VALUES (?, ?, ?, ?)',
+      [req.params.id, status, note, req.user.uid]
+    )
     res.json({ success: true })
   } catch (err) {
     res.status(500).json({ error: err.message })
@@ -1161,6 +1374,564 @@ app.post('/api/reviews', requireAuth, async (req, res) => {
       [orderId, productId, req.user.uid]
     )
     res.json(rows[0])
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// ═══════════════════════════════════════════════════════════
+// RECOMMENDATIONS  (AI-style: category scoring from history)
+// ═══════════════════════════════════════════════════════════
+
+// POST /api/recommendations/view — track a product page view
+app.post('/api/recommendations/view', optionalAuth, async (req, res) => {
+  const { productId, category } = req.body
+  if (!productId) return res.status(400).json({ error: 'productId required' })
+  const userId = req.user?.uid || ''
+  try {
+    await pool.execute(
+      'INSERT INTO product_views (userId, productId, category) VALUES (?, ?, ?)',
+      [userId, productId, category || '']
+    )
+    res.json({ success: true })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// GET /api/recommendations/similar/:productId — same-category products
+app.get('/api/recommendations/similar/:productId', async (req, res) => {
+  try {
+    const [base] = await pool.execute('SELECT category FROM products WHERE id = ?', [req.params.productId])
+    if (!base.length) return res.json([])
+    const [rows] = await pool.execute(
+      'SELECT * FROM products WHERE category = ? AND id != ? ORDER BY createdAt DESC LIMIT 10',
+      [base[0].category, req.params.productId]
+    )
+    res.json(rows)
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// GET /api/recommendations/user/:uid — personalised picks
+app.get('/api/recommendations/user/:uid', requireAuth, async (req, res) => {
+  const uid = req.params.uid
+  if (req.user.uid !== uid) return res.status(403).json({ error: 'Forbidden' })
+  try {
+    // Score categories from purchase history (weight 3×) + view history (weight 1×)
+    const [ordCats] = await pool.execute(`
+      SELECT p.category, COUNT(*) as freq
+      FROM order_items oi
+      JOIN orders o ON o.id = oi.orderId
+      JOIN products p ON p.id = oi.productId
+      WHERE o.userId = ?
+      GROUP BY p.category ORDER BY freq DESC LIMIT 5`, [uid])
+
+    const [viewCats] = await pool.execute(`
+      SELECT category, COUNT(*) as freq
+      FROM product_views WHERE userId = ? AND category != ''
+      GROUP BY category ORDER BY freq DESC LIMIT 5`, [uid])
+
+    const score = {}
+    ordCats.forEach(r  => { score[r.category]  = (score[r.category]  || 0) + r.freq * 3 })
+    viewCats.forEach(r => { score[r.category]  = (score[r.category]  || 0) + r.freq })
+
+    if (!Object.keys(score).length) {
+      const [rows] = await pool.execute('SELECT * FROM products ORDER BY createdAt DESC LIMIT 12')
+      return res.json(rows)
+    }
+
+    // Products already bought — exclude from recs
+    const [bought] = await pool.execute(`
+      SELECT DISTINCT oi.productId FROM order_items oi
+      JOIN orders o ON o.id = oi.orderId WHERE o.userId = ?`, [uid])
+    const boughtIds = bought.map(r => r.productId)
+
+    const cats = Object.keys(score)
+    let query  = `SELECT * FROM products WHERE category IN (${cats.map(() => '?').join(',')})`
+    const params = [...cats]
+    if (boughtIds.length) {
+      query += ` AND id NOT IN (${boughtIds.map(() => '?').join(',')})`
+      params.push(...boughtIds)
+    }
+    query += ' ORDER BY createdAt DESC LIMIT 24'
+
+    const [rows] = await pool.execute(query, params)
+    rows.sort((a, b) => (score[b.category] || 0) - (score[a.category] || 0))
+    res.json(rows.slice(0, 12))
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// GET /api/recommendations/trending — most-viewed products (last 30 days)
+app.get('/api/recommendations/trending', async (req, res) => {
+  try {
+    const [rows] = await pool.execute(`
+      SELECT p.*, COUNT(pv.id) as viewCount
+      FROM products p
+      LEFT JOIN product_views pv ON pv.productId = p.id
+        AND pv.viewedAt >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+      GROUP BY p.id
+      ORDER BY viewCount DESC, p.createdAt DESC
+      LIMIT 12`)
+    res.json(rows)
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// ═══════════════════════════════════════════════════════════
+// CHAT  (buyer ↔ seller)
+// ═══════════════════════════════════════════════════════════
+
+// POST /api/conversations — start or fetch existing conversation
+app.post('/api/conversations', requireAuth, async (req, res) => {
+  const { sellerId, sellerName = '', productId = '', productTitle = '' } = req.body
+  const buyerId   = req.user.uid
+  const buyerName = req.user.name || ''
+  if (!sellerId) return res.status(400).json({ error: 'sellerId required' })
+  if (buyerId === sellerId) return res.status(400).json({ error: 'Cannot message yourself' })
+  try {
+    const [existing] = await pool.execute(
+      'SELECT * FROM conversations WHERE buyerId=? AND sellerId=? AND productId=?',
+      [buyerId, sellerId, productId]
+    )
+    if (existing.length) return res.json(existing[0])
+    const id = uuidv4()
+    await pool.execute(
+      `INSERT INTO conversations (id,buyerId,buyerName,sellerId,sellerName,productId,productTitle)
+       VALUES (?,?,?,?,?,?,?)`,
+      [id, buyerId, buyerName, sellerId, sellerName, productId, productTitle]
+    )
+    const [rows] = await pool.execute('SELECT * FROM conversations WHERE id=?', [id])
+    res.json(rows[0])
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// GET /api/conversations/user/:uid — all conversations (buyer or seller inbox)
+app.get('/api/conversations/user/:uid', requireAuth, async (req, res) => {
+  const uid = req.params.uid
+  if (req.user.uid !== uid && req.user.role !== 'admin')
+    return res.status(403).json({ error: 'Forbidden' })
+  try {
+    const [rows] = await pool.execute(
+      `SELECT * FROM conversations WHERE buyerId=? OR sellerId=? ORDER BY updatedAt DESC`,
+      [uid, uid]
+    )
+    res.json(rows)
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// GET /api/conversations/:id/messages — messages in a conversation
+app.get('/api/conversations/:id/messages', requireAuth, async (req, res) => {
+  try {
+    const [conv] = await pool.execute('SELECT * FROM conversations WHERE id=?', [req.params.id])
+    if (!conv.length) return res.status(404).json({ error: 'Conversation not found' })
+    const c = conv[0]
+    if (c.buyerId !== req.user.uid && c.sellerId !== req.user.uid && req.user.role !== 'admin')
+      return res.status(403).json({ error: 'Forbidden' })
+    const [msgs] = await pool.execute(
+      'SELECT * FROM messages WHERE conversationId=? ORDER BY createdAt ASC',
+      [req.params.id]
+    )
+    res.json({ conversation: c, messages: msgs })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// POST /api/conversations/:id/messages — send a message
+app.post('/api/conversations/:id/messages', requireAuth, async (req, res) => {
+  const { text } = req.body
+  if (!text?.trim()) return res.status(400).json({ error: 'text required' })
+  try {
+    const [conv] = await pool.execute('SELECT * FROM conversations WHERE id=?', [req.params.id])
+    if (!conv.length) return res.status(404).json({ error: 'Conversation not found' })
+    const c = conv[0]
+    if (c.buyerId !== req.user.uid && c.sellerId !== req.user.uid)
+      return res.status(403).json({ error: 'Forbidden' })
+    const [result] = await pool.execute(
+      'INSERT INTO messages (conversationId,senderId,senderName,text) VALUES (?,?,?,?)',
+      [req.params.id, req.user.uid, req.user.name || '', text.trim()]
+    )
+    await pool.execute(
+      'UPDATE conversations SET lastMessage=?, lastSenderId=? WHERE id=?',
+      [text.trim().slice(0, 200), req.user.uid, req.params.id]
+    )
+    const [rows] = await pool.execute('SELECT * FROM messages WHERE id=?', [result.insertId])
+    res.json(rows[0])
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// ═══════════════════════════════════════════════════════════
+// ORDER TRACKING HISTORY
+// ═══════════════════════════════════════════════════════════
+
+// GET /api/orders/:id/tracking — full timeline for an order
+app.get('/api/orders/:id/tracking', requireAuth, async (req, res) => {
+  try {
+    const [orders] = await pool.execute('SELECT userId FROM orders WHERE id=?', [req.params.id])
+    if (!orders.length) return res.status(404).json({ error: 'Order not found' })
+    if (req.user.role !== 'admin' && orders[0].userId !== req.user.uid) {
+      const [sellerCheck] = await pool.execute(
+        'SELECT 1 FROM order_sellers WHERE orderId=? AND sellerUid=?',
+        [req.params.id, req.user.uid]
+      )
+      if (!sellerCheck.length) return res.status(403).json({ error: 'Forbidden' })
+    }
+    const [rows] = await pool.execute(
+      'SELECT * FROM order_tracking WHERE orderId=? ORDER BY createdAt ASC',
+      [req.params.id]
+    )
+    res.json(rows)
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// ═══════════════════════════════════════════════════════════
+// STOREFRONTS
+// ═══════════════════════════════════════════════════════════
+
+// GET /api/stores/:sellerUid — public store page
+app.get('/api/stores/:sellerUid', async (req, res) => {
+  try {
+    const [users] = await pool.execute(
+      `SELECT uid, name, email, role, storeName, phone, photoURL, createdAt
+       FROM users WHERE uid=? AND role='seller'`,
+      [req.params.sellerUid]
+    )
+    if (!users.length) return res.status(404).json({ error: 'Store not found' })
+    const user = users[0]
+
+    const [profileRows] = await pool.execute(
+      'SELECT * FROM seller_profiles WHERE sellerUid=?', [req.params.sellerUid]
+    )
+    const profile = profileRows[0] || {}
+
+    const [products] = await pool.execute(
+      'SELECT * FROM products WHERE sellerUid=? ORDER BY createdAt DESC LIMIT 20',
+      [req.params.sellerUid]
+    )
+
+    const [[{ followerCount }]] = await pool.execute(
+      'SELECT COUNT(*) as followerCount FROM store_follows WHERE sellerUid=?',
+      [req.params.sellerUid]
+    )
+    const [[{ productCount }]] = await pool.execute(
+      'SELECT COUNT(*) as productCount FROM products WHERE sellerUid=?',
+      [req.params.sellerUid]
+    )
+    const [[{ avgRating, reviewCount }]] = await pool.execute(`
+      SELECT AVG(r.rating) as avgRating, COUNT(r.id) as reviewCount
+      FROM reviews r JOIN products p ON p.id = r.productId
+      WHERE p.sellerUid=?`, [req.params.sellerUid]
+    )
+
+    res.json({
+      seller:  { uid: user.uid, name: user.name, storeName: user.storeName || user.name, photoURL: user.photoURL, createdAt: user.createdAt },
+      profile: { bio: profile.bio || '', bannerUrl: profile.bannerUrl || '', location: profile.location || '' },
+      stats:   { followerCount, productCount, avgRating: avgRating ? Number(avgRating).toFixed(1) : null, reviewCount: reviewCount || 0 },
+      products,
+    })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// PUT /api/stores/:sellerUid — update storefront profile (seller only)
+app.put('/api/stores/:sellerUid', requireAuth, async (req, res) => {
+  if (req.user.uid !== req.params.sellerUid && req.user.role !== 'admin')
+    return res.status(403).json({ error: 'Forbidden' })
+  const { bio = '', bannerUrl = '', location = '', storeName = '' } = req.body
+  try {
+    await pool.execute(
+      `INSERT INTO seller_profiles (sellerUid, bio, bannerUrl, location)
+       VALUES (?,?,?,?)
+       ON DUPLICATE KEY UPDATE bio=VALUES(bio), bannerUrl=VALUES(bannerUrl), location=VALUES(location)`,
+      [req.params.sellerUid, bio, bannerUrl, location]
+    )
+    if (storeName.trim()) {
+      await pool.execute('UPDATE users SET storeName=? WHERE uid=?', [storeName.trim(), req.params.sellerUid])
+    }
+    res.json({ success: true })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// POST /api/stores/:sellerUid/follow — toggle follow/unfollow
+app.post('/api/stores/:sellerUid/follow', requireAuth, async (req, res) => {
+  const buyerId    = req.user.uid
+  const sellerUid  = req.params.sellerUid
+  if (buyerId === sellerUid) return res.status(400).json({ error: 'Cannot follow yourself' })
+  try {
+    const [existing] = await pool.execute(
+      'SELECT 1 FROM store_follows WHERE buyerId=? AND sellerUid=?', [buyerId, sellerUid]
+    )
+    if (existing.length) {
+      await pool.execute('DELETE FROM store_follows WHERE buyerId=? AND sellerUid=?', [buyerId, sellerUid])
+      return res.json({ following: false })
+    }
+    await pool.execute('INSERT INTO store_follows (buyerId,sellerUid) VALUES (?,?)', [buyerId, sellerUid])
+    res.json({ following: true })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// GET /api/stores/:sellerUid/follow-status — check if current user follows
+app.get('/api/stores/:sellerUid/follow-status', requireAuth, async (req, res) => {
+  try {
+    const [rows] = await pool.execute(
+      'SELECT 1 FROM store_follows WHERE buyerId=? AND sellerUid=?',
+      [req.user.uid, req.params.sellerUid]
+    )
+    res.json({ following: rows.length > 0 })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// ═══════════════════════════════════════════════════════════
+// REWARDS
+// ═══════════════════════════════════════════════════════════
+
+// GET /api/rewards/:uid — balance + last 30 transactions
+app.get('/api/rewards/:uid', requireAuth, async (req, res) => {
+  if (req.user.uid !== req.params.uid && req.user.role !== 'admin')
+    return res.status(403).json({ error: 'Forbidden' })
+  try {
+    const [balRows] = await pool.execute(
+      'SELECT points FROM rewards WHERE userId = ?', [req.params.uid]
+    )
+    const points = balRows.length ? balRows[0].points : 0
+    const [txRows] = await pool.execute(
+      'SELECT * FROM points_transactions WHERE userId = ? ORDER BY createdAt DESC LIMIT 30',
+      [req.params.uid]
+    )
+    res.json({ points, transactions: txRows })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// ═══════════════════════════════════════════════════════════
+// WISHLIST
+// ═══════════════════════════════════════════════════════════
+
+// GET /api/wishlist/:uid — full wishlist with joined product data
+app.get('/api/wishlist/:uid', requireAuth, async (req, res) => {
+  if (req.user.uid !== req.params.uid && req.user.role !== 'admin')
+    return res.status(403).json({ error: 'Forbidden' })
+  try {
+    const [rows] = await pool.execute(`
+      SELECT w.id, w.userId, w.productId, w.notifyOnDrop, w.addedAt,
+             p.title, p.price, p.originalPrice, p.imageUrl, p.category,
+             p.discount, p.stock, p.sellerUid, p.sellerName
+      FROM wishlists w
+      LEFT JOIN products p ON p.id = w.productId
+      WHERE w.userId = ?
+      ORDER BY w.addedAt DESC`,
+      [req.params.uid]
+    )
+    res.json(rows)
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// GET /api/wishlist/check/:uid/:productId — is product wishlisted?
+app.get('/api/wishlist/check/:uid/:productId', requireAuth, async (req, res) => {
+  if (req.user.uid !== req.params.uid && req.user.role !== 'admin')
+    return res.status(403).json({ error: 'Forbidden' })
+  try {
+    const [rows] = await pool.execute(
+      'SELECT id, notifyOnDrop FROM wishlists WHERE userId = ? AND productId = ?',
+      [req.params.uid, req.params.productId]
+    )
+    res.json({ wishlisted: rows.length > 0, notifyOnDrop: rows.length ? !!rows[0].notifyOnDrop : true })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// POST /api/wishlist — add to wishlist
+app.post('/api/wishlist', requireAuth, async (req, res) => {
+  const { productId, notifyOnDrop = 1 } = req.body
+  if (!productId) return res.status(400).json({ error: 'productId required' })
+  try {
+    await pool.execute(
+      `INSERT INTO wishlists (userId, productId, notifyOnDrop) VALUES (?, ?, ?)
+       ON DUPLICATE KEY UPDATE notifyOnDrop = VALUES(notifyOnDrop)`,
+      [req.user.uid, productId, notifyOnDrop ? 1 : 0]
+    )
+    const [rows] = await pool.execute(
+      'SELECT * FROM wishlists WHERE userId = ? AND productId = ?',
+      [req.user.uid, productId]
+    )
+    res.json(rows[0])
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// DELETE /api/wishlist/:uid/:productId — remove from wishlist
+app.delete('/api/wishlist/:uid/:productId', requireAuth, async (req, res) => {
+  if (req.user.uid !== req.params.uid && req.user.role !== 'admin')
+    return res.status(403).json({ error: 'Forbidden' })
+  try {
+    await pool.execute(
+      'DELETE FROM wishlists WHERE userId = ? AND productId = ?',
+      [req.params.uid, req.params.productId]
+    )
+    res.json({ success: true })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// ═══════════════════════════════════════════════════════════
+// NOTIFICATIONS
+// ═══════════════════════════════════════════════════════════
+
+// GET /api/notifications/:uid — all notifications, unread first
+app.get('/api/notifications/:uid', requireAuth, async (req, res) => {
+  if (req.user.uid !== req.params.uid && req.user.role !== 'admin')
+    return res.status(403).json({ error: 'Forbidden' })
+  try {
+    const [rows] = await pool.execute(
+      `SELECT * FROM notifications WHERE userId = ?
+       ORDER BY isRead ASC, createdAt DESC LIMIT 50`,
+      [req.params.uid]
+    )
+    const unread = rows.filter(r => !r.isRead).length
+    res.json({ notifications: rows, unread })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// PUT /api/notifications/:uid/read-all
+app.put('/api/notifications/:uid/read-all', requireAuth, async (req, res) => {
+  if (req.user.uid !== req.params.uid)
+    return res.status(403).json({ error: 'Forbidden' })
+  try {
+    await pool.execute('UPDATE notifications SET isRead = 1 WHERE userId = ?', [req.params.uid])
+    res.json({ success: true })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// DELETE /api/notifications/:uid/:id — delete a single notification
+app.delete('/api/notifications/:uid/:id', requireAuth, async (req, res) => {
+  if (req.user.uid !== req.params.uid)
+    return res.status(403).json({ error: 'Forbidden' })
+  try {
+    await pool.execute(
+      'DELETE FROM notifications WHERE id = ? AND userId = ?',
+      [req.params.id, req.params.uid]
+    )
+    res.json({ success: true })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// ═══════════════════════════════════════════════════════════
+// SELLER ANALYTICS
+// ═══════════════════════════════════════════════════════════
+
+// GET /api/analytics/seller/:uid — revenue, orders, best sellers, monthly chart
+app.get('/api/analytics/seller/:uid', requireAuth, async (req, res) => {
+  const uid = req.params.uid
+  if (req.user.uid !== uid && req.user.role !== 'admin')
+    return res.status(403).json({ error: 'Forbidden' })
+  try {
+    const [[totals]] = await pool.execute(`
+      SELECT
+        COALESCE(SUM(oi.price * oi.quantity), 0) AS totalRevenue,
+        COUNT(DISTINCT o.id)                      AS totalOrders
+      FROM order_items oi
+      JOIN orders o ON o.id = oi.orderId
+      WHERE oi.sellerUid = ? AND o.status != 'cancelled'`,
+      [uid]
+    )
+
+    const [[{ productCount }]] = await pool.execute(
+      'SELECT COUNT(*) AS productCount FROM products WHERE sellerUid = ?', [uid]
+    )
+
+    // Monthly revenue — last 6 months
+    const [monthly] = await pool.execute(`
+      SELECT
+        DATE_FORMAT(o.createdAt, '%Y-%m')   AS month,
+        DATE_FORMAT(o.createdAt, '%b %Y')   AS label,
+        COALESCE(SUM(oi.price * oi.quantity), 0) AS revenue,
+        COUNT(DISTINCT o.id)                AS orders
+      FROM order_items oi
+      JOIN orders o ON o.id = oi.orderId
+      WHERE oi.sellerUid = ?
+        AND o.status != 'cancelled'
+        AND o.createdAt >= DATE_SUB(NOW(), INTERVAL 6 MONTH)
+      GROUP BY DATE_FORMAT(o.createdAt, '%Y-%m'), DATE_FORMAT(o.createdAt, '%b %Y')
+      ORDER BY month ASC`,
+      [uid]
+    )
+
+    // Best sellers by units sold
+    const [bestSellers] = await pool.execute(`
+      SELECT
+        oi.productId,
+        p.title,
+        p.imageUrl,
+        p.category,
+        p.price AS currentPrice,
+        COALESCE(SUM(oi.quantity), 0)            AS totalSold,
+        COALESCE(SUM(oi.price * oi.quantity), 0) AS revenue
+      FROM order_items oi
+      JOIN products p  ON p.id  = oi.productId
+      JOIN orders   o  ON o.id  = oi.orderId
+      WHERE oi.sellerUid = ? AND o.status != 'cancelled'
+      GROUP BY oi.productId, p.title, p.imageUrl, p.category, p.price
+      ORDER BY totalSold DESC LIMIT 5`,
+      [uid]
+    )
+
+    // Category breakdown
+    const [categories] = await pool.execute(`
+      SELECT
+        p.category,
+        COALESCE(SUM(oi.quantity), 0)            AS totalSold,
+        COALESCE(SUM(oi.price * oi.quantity), 0) AS revenue
+      FROM order_items oi
+      JOIN products p ON p.id = oi.productId
+      JOIN orders   o ON o.id = oi.orderId
+      WHERE oi.sellerUid = ? AND o.status != 'cancelled'
+      GROUP BY p.category
+      ORDER BY revenue DESC`,
+      [uid]
+    )
+
+    res.json({
+      totalRevenue:  Number(totals.totalRevenue),
+      totalOrders:   Number(totals.totalOrders),
+      productCount:  Number(productCount),
+      avgOrderValue: totals.totalOrders > 0
+        ? +(totals.totalRevenue / totals.totalOrders).toFixed(2) : 0,
+      monthly,
+      bestSellers,
+      categories,
+    })
   } catch (err) {
     res.status(500).json({ error: err.message })
   }

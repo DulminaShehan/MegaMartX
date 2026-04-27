@@ -12,10 +12,13 @@ import {
   FiDollarSign, FiPercent, FiTag, FiInfo, FiLayers,
   FiTruck, FiClock, FiAlertCircle, FiBox,
   FiChevronDown, FiChevronUp, FiLogOut, FiImage,
+  FiGlobe, FiSave, FiMapPin, FiExternalLink, FiBarChart2,
+  FiTrendingUp, FiAward,
 } from 'react-icons/fi'
 import {
   addProduct, updateProduct, deleteProduct,
   getSellerProducts, getSellerOrders, updateOrderStatus,
+  getStoreProfile, updateStoreProfile, getSellerAnalytics,
 } from '../firebase/firestore'
 import { useAuth } from '../context/AuthContext'
 import { formatPrice, formatDate, CATEGORIES, STATUS_COLORS, imgFallback } from '../utils/helpers'
@@ -30,11 +33,20 @@ const BLANK = { name: '', description: '', category: 'Electronics', price: '', d
 
 // ── Nav items ─────────────────────────────────────────────────
 const NAV = [
-  { id: 'dashboard', label: 'Dashboard',   icon: FiGrid },
-  { id: 'add',       label: 'Add Product', icon: FiPlus },
-  { id: 'products',  label: 'My Products', icon: FiPackage },
-  { id: 'orders',    label: 'Orders',      icon: FiShoppingBag },
+  { id: 'dashboard',  label: 'Dashboard',   icon: FiGrid },
+  { id: 'add',        label: 'Add Product', icon: FiPlus },
+  { id: 'products',   label: 'My Products', icon: FiPackage },
+  { id: 'orders',     label: 'Orders',      icon: FiShoppingBag },
+  { id: 'analytics',  label: 'Analytics',   icon: FiBarChart2 },
+  { id: 'storefront', label: 'My Store',    icon: FiGlobe },
 ]
+
+// Tracking statuses available to sellers
+const SELLER_STATUSES = ['pending', 'packed', 'shipped', 'out_for_delivery', 'delivered', 'cancelled']
+const STATUS_LABELS   = {
+  pending: 'Pending', packed: 'Packed', shipped: 'Shipped',
+  out_for_delivery: 'Out for Delivery', delivered: 'Delivered', cancelled: 'Cancelled',
+}
 
 // ─────────────────────────────────────────────────────────────
 const SellerDashboard = () => {
@@ -45,13 +57,21 @@ const SellerDashboard = () => {
   const [orders, setOrders]       = useState([])
   const [loading, setLoading]     = useState(true)
   const [saving,  setSaving]      = useState(false)
-  const [editItem, setEditItem]   = useState(null)     // product being edited
+  const [editItem, setEditItem]   = useState(null)
   const [form, setForm]           = useState(BLANK)
   const [imgFile, setImgFile]     = useState(null)
   const [preview, setPreview]     = useState('')
   const [dragOver, setDragOver]   = useState(false)
-  const [expanded, setExpanded]   = useState(null)     // expanded order id
+  const [expanded, setExpanded]   = useState(null)
   const fileRef = useRef(null)
+
+  // Storefront state
+  const [storeForm, setStoreForm]   = useState({ storeName: '', bio: '', bannerUrl: '', location: '' })
+  const [storeSaving, setStoreSaving] = useState(false)
+
+  // Analytics state
+  const [analyticsData, setAnalyticsData] = useState(null)
+  const [analyticsLoad, setAnalyticsLoad] = useState(false)
 
   // ── Load seller data ────────────────────────────────────────
   useEffect(() => {
@@ -180,8 +200,47 @@ const SellerDashboard = () => {
     try {
       await updateOrderStatus(orderId, status)
       setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status } : o))
-      toast.success(`Status → ${status}`)
+      toast.success(`Status updated: ${STATUS_LABELS[status] || status}`)
     } catch { toast.error('Failed to update') }
+  }
+
+  // ── Load analytics when switching to that tab ───────────────
+  const handleViewAnalytics = async () => {
+    setView('analytics')
+    if (analyticsData) return   // already loaded
+    setAnalyticsLoad(true)
+    try {
+      const d = await getSellerAnalytics(currentUser.uid)
+      setAnalyticsData(d)
+    } catch { toast.error('Failed to load analytics') }
+    finally { setAnalyticsLoad(false) }
+  }
+
+  // ── Load storefront when switching to that tab ───────────────
+  const handleViewStorefront = async () => {
+    setView('storefront')
+    try {
+      const data = await getStoreProfile(currentUser.uid)
+      setStoreForm({
+        storeName: data.seller.storeName || '',
+        bio:       data.profile.bio      || '',
+        bannerUrl: data.profile.bannerUrl|| '',
+        location:  data.profile.location || '',
+      })
+    } catch {
+      setStoreForm(f => ({ ...f, storeName: userProfile?.storeName || '' }))
+    }
+  }
+
+  // ── Save storefront ──────────────────────────────────────────
+  const handleStoreSave = async (e) => {
+    e.preventDefault()
+    setStoreSaving(true)
+    try {
+      await updateStoreProfile(currentUser.uid, storeForm)
+      toast.success('Store profile updated!')
+    } catch { toast.error('Failed to save store') }
+    finally { setStoreSaving(false) }
   }
 
   if (loading) return <FullPageLoader />
@@ -220,7 +279,12 @@ const SellerDashboard = () => {
             <button
               key={id}
               style={{ ...s.navItem, ...(view === id ? s.navActive : {}) }}
-              onClick={() => { if (id === 'add') resetForm(); setView(id) }}
+              onClick={() => {
+                if (id === 'add')        { resetForm(); setView(id); return }
+                if (id === 'storefront') { handleViewStorefront(); return }
+                if (id === 'analytics')  { handleViewAnalytics(); return }
+                setView(id)
+              }}
             >
               <Icon size={16} />
               <span style={s.navLabel}>{label}</span>
@@ -664,18 +728,18 @@ const SellerDashboard = () => {
                           {/* Status buttons */}
                           <div style={s.statusRow}>
                             <span style={s.statusLabel}>Update Status:</span>
-                            {['pending', 'processing', 'shipped', 'delivered', 'cancelled'].map(st => (
+                            {SELLER_STATUSES.map(st => (
                               <button
                                 key={st}
                                 style={{
                                   ...s.stBtn,
-                                  background: order.status === st ? STATUS_COLORS[st] : 'transparent',
-                                  color:      order.status === st ? '#fff' : STATUS_COLORS[st],
-                                  border:     `1.5px solid ${STATUS_COLORS[st]}`,
+                                  background: order.status === st ? (STATUS_COLORS[st] || '#888') : 'transparent',
+                                  color:      order.status === st ? '#fff' : (STATUS_COLORS[st] || '#888'),
+                                  border:     `1.5px solid ${STATUS_COLORS[st] || '#888'}`,
                                 }}
                                 onClick={() => handleStatus(order.id, st)}
                               >
-                                {st}
+                                {STATUS_LABELS[st] || st}
                               </button>
                             ))}
                           </div>
@@ -686,6 +750,221 @@ const SellerDashboard = () => {
                 })}
               </div>
             )}
+          </div>
+        )}
+
+        {/* ── Storefront ── */}
+        {/* ── Analytics ── */}
+        {view === 'analytics' && (
+          <div>
+            <div style={s.pageHead}>
+              <h1 style={s.pageTitle}>Analytics</h1>
+              <p style={s.pageSub}>Sales performance and product insights</p>
+            </div>
+
+            {analyticsLoad || !analyticsData ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                {[...Array(3)].map((_, i) => (
+                  <div key={i} style={{ height: '80px', borderRadius: '14px', background: '#f0f8ff', animation: 'shimmer 1.4s infinite' }} />
+                ))}
+              </div>
+            ) : (
+              <>
+                {/* KPI cards */}
+                <div style={s.statsGrid}>
+                  {[
+                    { label: 'Total Revenue',   value: `$${Number(analyticsData.totalRevenue).toFixed(2)}`,  icon: FiDollarSign, color: '#10b981' },
+                    { label: 'Total Orders',    value: analyticsData.totalOrders,   icon: FiShoppingBag, color: '#2196F3' },
+                    { label: 'Avg Order Value', value: `$${Number(analyticsData.avgOrderValue).toFixed(2)}`, icon: FiTrendingUp, color: '#8b5cf6' },
+                    { label: 'Products Listed', value: analyticsData.productCount,  icon: FiPackage,    color: '#f59e0b' },
+                  ].map(stat => (
+                    <div key={stat.label} style={s.statCard}>
+                      <div style={{ ...s.statIcon, background: stat.color + '18' }}>
+                        <stat.icon size={20} color={stat.color} />
+                      </div>
+                      <div>
+                        <div style={s.statValue}>{stat.value}</div>
+                        <div style={s.statLabel}>{stat.label}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Monthly revenue chart */}
+                <div style={s.section}>
+                  <h3 style={s.sectionTitle}>
+                    <FiBarChart2 size={16} color="#2196F3" style={{ verticalAlign: 'middle', marginRight: '8px' }} />
+                    Revenue — Last 6 Months
+                  </h3>
+                  {analyticsData.monthly.length === 0 ? (
+                    <p style={{ color: '#aaa', fontSize: '14px' }}>No sales data yet.</p>
+                  ) : (
+                    <div style={s.chartWrap}>
+                      <BarChart data={analyticsData.monthly} />
+                    </div>
+                  )}
+                </div>
+
+                {/* Best sellers */}
+                <div style={s.section}>
+                  <h3 style={s.sectionTitle}>
+                    <FiAward size={16} color="#f59e0b" style={{ verticalAlign: 'middle', marginRight: '8px' }} />
+                    Best Selling Products
+                  </h3>
+                  {analyticsData.bestSellers.length === 0 ? (
+                    <p style={{ color: '#aaa', fontSize: '14px' }}>No sales yet.</p>
+                  ) : (
+                    <div style={s.bsTable}>
+                      <div style={s.bsHead}>
+                        {['#', 'Product', 'Category', 'Units Sold', 'Revenue'].map(h => (
+                          <span key={h} style={s.bsHeadCell}>{h}</span>
+                        ))}
+                      </div>
+                      {analyticsData.bestSellers.map((p, i) => (
+                        <div key={p.productId} style={s.bsRow}>
+                          <span style={s.bsRank}>{i + 1}</span>
+                          <div style={s.bsProduct}>
+                            <img
+                              src={p.imageUrl || imgFallback(40, 40)}
+                              alt={p.title}
+                              style={s.bsImg}
+                              onError={e => { e.target.src = imgFallback(40, 40) }}
+                            />
+                            <span style={s.bsTitle}>{p.title}</span>
+                          </div>
+                          <span style={s.bsCell}>{p.category}</span>
+                          <span style={{ ...s.bsCell, fontWeight: 700 }}>{p.totalSold}</span>
+                          <span style={{ ...s.bsCell, color: '#10b981', fontWeight: 700 }}>
+                            ${Number(p.revenue).toFixed(2)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Category breakdown */}
+                {analyticsData.categories.length > 0 && (
+                  <div style={s.section}>
+                    <h3 style={s.sectionTitle}>Sales by Category</h3>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                      {analyticsData.categories.map(c => {
+                        const total = analyticsData.categories.reduce((s, x) => s + Number(x.revenue), 0)
+                        const pct   = total > 0 ? ((Number(c.revenue) / total) * 100).toFixed(1) : 0
+                        return (
+                          <div key={c.category}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                              <span style={{ fontSize: '13px', fontWeight: 600, color: '#000' }}>{c.category}</span>
+                              <span style={{ fontSize: '13px', color: '#888' }}>{pct}% · ${Number(c.revenue).toFixed(2)}</span>
+                            </div>
+                            <div style={{ height: '8px', background: '#e3f2fd', borderRadius: '4px', overflow: 'hidden' }}>
+                              <div style={{ height: '100%', width: `${pct}%`, background: '#2196F3', borderRadius: '4px', transition: 'width .4s' }} />
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
+        {view === 'storefront' && (
+          <div>
+            <div style={{ ...s.pageHead, ...s.pageHeadRow }}>
+              <div>
+                <h1 style={s.pageTitle}>My Store</h1>
+                <p style={s.pageSub}>Customise how buyers see your storefront</p>
+              </div>
+              <a
+                href={`/store/${currentUser.uid}`}
+                target="_blank"
+                rel="noreferrer"
+                style={{ ...s.addBtn, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+              >
+                <FiExternalLink size={14} /> View Live Store
+              </a>
+            </div>
+
+            <form onSubmit={handleStoreSave} style={{ display: 'flex', flexDirection: 'column', gap: '18px', maxWidth: '680px' }}>
+
+              {/* Store name */}
+              <div style={s.formCard}>
+                <div style={s.cardHead}><FiGlobe size={15} /> Store Identity</div>
+                <div style={s.field}>
+                  <label style={s.label}>Store Name</label>
+                  <input
+                    style={s.input}
+                    placeholder="e.g. Tech Universe"
+                    value={storeForm.storeName}
+                    onChange={e => setStoreForm(f => ({ ...f, storeName: e.target.value }))}
+                    maxLength={100}
+                  />
+                </div>
+                <div style={{ ...s.field, marginTop: '14px' }}>
+                  <label style={s.label}>Store Bio</label>
+                  <textarea
+                    style={{ ...s.input, height: '90px', resize: 'vertical' }}
+                    placeholder="Tell buyers about your store, what you sell, your quality promise…"
+                    value={storeForm.bio}
+                    onChange={e => setStoreForm(f => ({ ...f, bio: e.target.value }))}
+                    maxLength={500}
+                  />
+                  <div style={s.charCount}>{storeForm.bio.length} / 500</div>
+                </div>
+              </div>
+
+              {/* Visuals */}
+              <div style={s.formCard}>
+                <div style={s.cardHead}><FiImage size={15} /> Store Visuals</div>
+                <div style={s.field}>
+                  <label style={s.label}>Banner Image URL</label>
+                  <input
+                    style={s.input}
+                    placeholder="https://… (1200×300 recommended)"
+                    value={storeForm.bannerUrl}
+                    onChange={e => setStoreForm(f => ({ ...f, bannerUrl: e.target.value }))}
+                  />
+                  {storeForm.bannerUrl && (
+                    <div style={{ marginTop: '10px', borderRadius: '10px', overflow: 'hidden', height: '100px', background: '#e3f2fd' }}>
+                      <img
+                        src={storeForm.bannerUrl}
+                        alt="Banner preview"
+                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                        onError={e => { e.target.style.display = 'none' }}
+                      />
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Location */}
+              <div style={s.formCard}>
+                <div style={s.cardHead}><FiMapPin size={15} /> Location</div>
+                <div style={s.field}>
+                  <label style={s.label}>City / Region</label>
+                  <input
+                    style={s.input}
+                    placeholder="e.g. Colombo, Sri Lanka"
+                    value={storeForm.location}
+                    onChange={e => setStoreForm(f => ({ ...f, location: e.target.value }))}
+                    maxLength={100}
+                  />
+                </div>
+              </div>
+
+              <div style={s.formActions}>
+                <button
+                  type="submit"
+                  style={{ ...s.saveBtn, opacity: storeSaving ? 0.75 : 1 }}
+                  disabled={storeSaving}
+                >
+                  <FiSave size={14} /> {storeSaving ? 'Saving…' : 'Save Store Profile'}
+                </button>
+              </div>
+            </form>
           </div>
         )}
 
@@ -1000,6 +1279,59 @@ const s = {
     background: '#fff', borderRadius: '16px',
     border: '1px solid #e3f2fd',
   },
+
+  // Analytics
+  chartWrap: {
+    background: '#fff', border: '1.5px solid #e3f2fd',
+    borderRadius: '14px', padding: '20px 24px',
+  },
+  bsTable: { display: 'flex', flexDirection: 'column', gap: '2px' },
+  bsHead: {
+    display: 'grid', gridTemplateColumns: '32px 1fr 120px 100px 110px',
+    gap: '12px', padding: '8px 12px',
+    background: '#f0f8ff', borderRadius: '10px',
+    marginBottom: '4px',
+  },
+  bsRow: {
+    display: 'grid', gridTemplateColumns: '32px 1fr 120px 100px 110px',
+    gap: '12px', padding: '10px 12px',
+    background: '#fff', borderRadius: '10px',
+    border: '1px solid #f0f8ff', alignItems: 'center',
+  },
+  bsHeadCell: { color: '#888', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase' },
+  bsRank:     { color: '#2196F3', fontSize: '14px', fontWeight: 800 },
+  bsProduct:  { display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 },
+  bsImg:      { width: '36px', height: '36px', objectFit: 'cover', borderRadius: '8px', flexShrink: 0 },
+  bsTitle:    { color: '#000', fontSize: '13px', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  bsCell:     { color: '#555', fontSize: '13px' },
+}
+
+// ── CSS bar chart (no external library) ──────────────────────
+const BarChart = ({ data }) => {
+  const maxRev = Math.max(...data.map(d => Number(d.revenue) || 0), 1)
+  return (
+    <div style={{ display: 'flex', alignItems: 'flex-end', gap: '10px', height: '180px', paddingBottom: '28px', position: 'relative' }}>
+      {data.map((d, i) => {
+        const h = Math.max((Number(d.revenue) / maxRev) * 130, 4)
+        return (
+          <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px', position: 'relative' }}>
+            <span style={{ fontSize: '10px', color: '#2196F3', fontWeight: 700, position: 'absolute', top: `${130 - h - 18}px` }}>
+              ${Number(d.revenue) >= 1000 ? (Number(d.revenue) / 1000).toFixed(1) + 'k' : Number(d.revenue).toFixed(0)}
+            </span>
+            <div style={{
+              width: '100%', height: `${h}px`,
+              background: 'linear-gradient(180deg, #2196F3 0%, #42A5F5 100%)',
+              borderRadius: '6px 6px 0 0',
+              position: 'absolute', bottom: '28px',
+            }} />
+            <span style={{ fontSize: '10px', color: '#888', textAlign: 'center', lineHeight: 1.2, position: 'absolute', bottom: 0 }}>
+              {d.label}
+            </span>
+          </div>
+        )
+      })}
+    </div>
+  )
 }
 
 export default SellerDashboard

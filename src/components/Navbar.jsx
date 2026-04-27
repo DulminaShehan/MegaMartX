@@ -7,9 +7,11 @@ import { Link, useNavigate } from 'react-router-dom'
 import {
   FiShoppingCart, FiSearch, FiMenu, FiX,
   FiUser, FiLogOut, FiPackage, FiShield, FiChevronDown, FiKey,
+  FiMessageSquare, FiGlobe, FiHeart, FiStar,
 } from 'react-icons/fi'
 import { useAuth } from '../context/AuthContext'
 import { useCart } from '../context/CartContext'
+import NotificationBell from './NotificationBell'
 import toast from 'react-hot-toast'
 
 const Navbar = () => {
@@ -83,6 +85,23 @@ const Navbar = () => {
             {cartCount > 0 && <span style={s.badge}>{cartCount}</span>}
           </Link>
 
+          {/* Wishlist icon — logged-in users */}
+          {currentUser && (
+            <Link to="/wishlist" style={s.cartBtn} title="Wishlist">
+              <FiHeart size={20} />
+            </Link>
+          )}
+
+          {/* Messages icon — logged-in users */}
+          {currentUser && (
+            <Link to="/messages" style={s.cartBtn} title="Messages">
+              <FiMessageSquare size={20} />
+            </Link>
+          )}
+
+          {/* Notification bell — logged-in users */}
+          {currentUser && <NotificationBell />}
+
           {/* Admin quick-access button — only shown to admins */}
           {currentUser && isAdmin && (
             <Link to="/admin" style={s.adminNavBtn}>
@@ -118,9 +137,23 @@ const Navbar = () => {
                     <Link to="/orders" style={s.dropItem} onClick={() => setDropdownOpen(false)}>
                       <FiPackage size={15} /> My Orders
                     </Link>
+                    <Link to="/wishlist" style={s.dropItem} onClick={() => setDropdownOpen(false)}>
+                      <FiHeart size={15} /> Wishlist
+                    </Link>
+                    <Link to="/rewards" style={s.dropItem} onClick={() => setDropdownOpen(false)}>
+                      <FiStar size={15} /> Rewards
+                    </Link>
+                    <Link to="/messages" style={s.dropItem} onClick={() => setDropdownOpen(false)}>
+                      <FiMessageSquare size={15} /> Messages
+                    </Link>
                     {isSeller && (
                       <Link to="/seller" style={s.dropItem} onClick={() => setDropdownOpen(false)}>
                         <FiPackage size={15} /> Seller Dashboard
+                      </Link>
+                    )}
+                    {isSeller && (
+                      <Link to={`/store/${currentUser.uid}`} style={s.dropItem} onClick={() => setDropdownOpen(false)}>
+                        <FiGlobe size={15} /> My Store
                       </Link>
                     )}
                     {isAdmin && (
@@ -192,8 +225,12 @@ const Navbar = () => {
 
           {currentUser ? (
             <>
-              <Link to="/orders" style={s.mobileLink} onClick={() => setMenuOpen(false)}>My Orders</Link>
+              <Link to="/orders"   style={s.mobileLink} onClick={() => setMenuOpen(false)}>My Orders</Link>
+              <Link to="/wishlist" style={s.mobileLink} onClick={() => setMenuOpen(false)}>Wishlist</Link>
+              <Link to="/rewards"  style={s.mobileLink} onClick={() => setMenuOpen(false)}>Rewards</Link>
+              <Link to="/messages" style={s.mobileLink} onClick={() => setMenuOpen(false)}>Messages</Link>
               {isSeller && <Link to="/seller" style={s.mobileLink} onClick={() => setMenuOpen(false)}>Seller Dashboard</Link>}
+              {isSeller && <Link to={`/store/${currentUser.uid}`} style={s.mobileLink} onClick={() => setMenuOpen(false)}>My Store</Link>}
               {isAdmin && (
                 <>
                   <div style={s.mobileAdminLabel}><FiShield size={13} /> Admin</div>
