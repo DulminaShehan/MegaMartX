@@ -379,13 +379,13 @@ const SellerDashboard = () => {
       <aside style={s.sidebar} className="sd-sidebar">
 
         {/* Brand */}
-        <div style={s.brand}>
+        <div style={s.brand} className="sd-brand">
           <span style={s.brandText}>Mega<span style={s.brandBlue}>Mart</span>X</span>
           <span style={s.brandBadge}>Seller</span>
         </div>
 
         {/* Seller info */}
-        <div style={s.sellerCard}>
+        <div style={s.sellerCard} className="sd-seller-card">
           <div style={s.avatar}>{(userProfile?.name || 'S')[0].toUpperCase()}</div>
           <div style={{ minWidth: 0 }}>
             <div style={s.sellerName}>{userProfile?.name || 'Seller'}</div>
@@ -394,11 +394,12 @@ const SellerDashboard = () => {
         </div>
 
         {/* Navigation */}
-        <nav style={s.nav}>
+        <nav style={s.nav} className="sd-nav">
           {NAV.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
               style={{ ...s.navItem, ...(view === id ? s.navActive : {}) }}
+              className="sd-nav-item"
               onClick={() => {
                 if (id === 'add')        { resetForm(); setView(id); return }
                 if (id === 'storefront') { handleViewStorefront(); return }
