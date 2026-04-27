@@ -408,7 +408,7 @@ const SellerDashboard = () => {
               }}
             >
               <Icon size={16} />
-              <span style={s.navLabel}>{label}</span>
+              <span style={s.navLabel} className="sd-nav-label">{label}</span>
               {id === 'orders' && pendingCount > 0 && (
                 <span style={s.navBadge}>{pendingCount}</span>
               )}
