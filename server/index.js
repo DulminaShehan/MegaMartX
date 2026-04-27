@@ -119,6 +119,13 @@ app.post('/api/upload', upload.single('image'), (req, res) => {
   res.json({ url, filename: req.file.filename })
 })
 
+// POST /api/upload-multiple — upload up to 3 product images at once
+app.post('/api/upload-multiple', upload.array('images', 3), (req, res) => {
+  if (!req.files || req.files.length === 0) return res.status(400).json({ error: 'No files uploaded' })
+  const urls = req.files.map(f => `http://localhost:${PORT}/uploads/${f.filename}`)
+  res.json({ urls })
+})
+
 const DB_NAME = process.env.DB_NAME || 'megamartx'
 const DB_CONFIG = {
   host:             process.env.DB_HOST || 'localhost',
@@ -430,6 +437,48 @@ const initDB = async () => {
       )
     `)
 
+    // Product variants — color × size combinations with per-variant stock
+    await conn.execute(`
+      CREATE TABLE IF NOT EXISTS product_variants (
+        id        INT AUTO_INCREMENT PRIMARY KEY,
+        productId VARCHAR(36) NOT NULL,
+        color     VARCHAR(100) DEFAULT '',
+        size      VARCHAR(50)  DEFAULT '',
+        stock     INT DEFAULT 0,
+        INDEX idx_pvar_product (productId)
+      )
+    `)
+
+    // Product images — up to 3 per product, first is primary
+    await conn.execute(`
+      CREATE TABLE IF NOT EXISTS product_images (
+        id        INT AUTO_INCREMENT PRIMARY KEY,
+        productId VARCHAR(36) NOT NULL,
+        imageUrl  TEXT,
+        isPrimary TINYINT DEFAULT 0,
+        sortOrder INT DEFAULT 0,
+        INDEX idx_pimg_product (productId)
+      )
+    `)
+
+    // Migrate: add color/size to order_items and cart
+    const addColIfMissing = async (table, col, def) => {
+      const [rows] = await conn.execute(
+        `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+         WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = ?`,
+        [DB_NAME, table, col]
+      )
+      if (!rows.length) await conn.execute(`ALTER TABLE \`${table}\` ADD COLUMN \`${col}\` ${def}`)
+    }
+    await addColIfMissing('order_items', 'color', "VARCHAR(100) DEFAULT ''")
+    await addColIfMissing('order_items', 'size',  "VARCHAR(50) DEFAULT ''")
+    await addColIfMissing('cart',        'color', "VARCHAR(100) DEFAULT ''")
+    await addColIfMissing('cart',        'size',  "VARCHAR(50) DEFAULT ''")
+
+    // Migrate cart unique key to include color/size so same product can have multiple variants in cart
+    try { await conn.execute('ALTER TABLE cart DROP INDEX uq_user_product') } catch (_) {}
+    try { await conn.execute('ALTER TABLE cart ADD UNIQUE KEY uq_user_product_variant (userId, productId, color, size)') } catch (_) {}
+
     console.log('✅ MySQL tables ready')
   } finally {
     conn.release()
@@ -609,6 +658,7 @@ app.post('/api/products', async (req, res) => {
     return res.status(400).json({ error: 'sellerUid, title, price required' })
   }
   try {
+    const { variants = [], images = [] } = req.body
     await pool.execute(
       `INSERT INTO products
         (id, sellerUid, sellerName, title, description, brand, category, price, originalPrice, discount, stock, imageUrl, imagePath)
@@ -616,8 +666,22 @@ app.post('/api/products', async (req, res) => {
       [id, sellerUid, sellerName, title, description, brand, category,
        price, originalPrice ?? price, discount, stock, imageUrl, imagePath]
     )
+    for (const v of variants) {
+      await pool.execute(
+        'INSERT INTO product_variants (productId, color, size, stock) VALUES (?, ?, ?, ?)',
+        [id, v.color || '', v.size || '', parseInt(v.stock) || 0]
+      )
+    }
+    for (let i = 0; i < images.length; i++) {
+      await pool.execute(
+        'INSERT INTO product_images (productId, imageUrl, isPrimary, sortOrder) VALUES (?, ?, ?, ?)',
+        [id, images[i].url || images[i], i === 0 ? 1 : 0, i]
+      )
+    }
     const [rows] = await pool.execute('SELECT * FROM products WHERE id = ?', [id])
-    res.json(rows[0])
+    const [retVariants] = await pool.execute('SELECT * FROM product_variants WHERE productId = ? ORDER BY color, size', [id])
+    const [retImages]   = await pool.execute('SELECT * FROM product_images WHERE productId = ? ORDER BY isPrimary DESC, sortOrder', [id])
+    res.json({ ...rows[0], variants: retVariants, images: retImages })
   } catch (err) {
     console.error('POST /api/products:', err.message)
     res.status(500).json({ error: err.message })
@@ -642,12 +706,18 @@ app.get('/api/products', async (req, res) => {
   }
 })
 
-// GET /api/products/:id — single product
+// GET /api/products/:id — single product with variants + images
 app.get('/api/products/:id', async (req, res) => {
   try {
     const [rows] = await pool.execute('SELECT * FROM products WHERE id = ?', [req.params.id])
     if (!rows.length) return res.status(404).json({ error: 'Product not found' })
-    res.json(rows[0])
+    const [variants] = await pool.execute(
+      'SELECT * FROM product_variants WHERE productId = ? ORDER BY color, size', [req.params.id]
+    )
+    const [images] = await pool.execute(
+      'SELECT * FROM product_images WHERE productId = ? ORDER BY isPrimary DESC, sortOrder ASC', [req.params.id]
+    )
+    res.json({ ...rows[0], variants, images })
   } catch (err) {
     res.status(500).json({ error: err.message })
   }
@@ -658,6 +728,7 @@ app.put('/api/products/:id', async (req, res) => {
   const {
     title, description = '', brand = '', category = '', price,
     originalPrice, discount = 0, stock = 0, imageUrl = '', imagePath = '',
+    variants = [], images = [],
   } = req.body
   try {
     const [oldRows] = await pool.execute('SELECT price FROM products WHERE id = ?', [req.params.id])
@@ -691,8 +762,29 @@ app.put('/api/products/:id', async (req, res) => {
       }
     }
 
-    const [rows] = await pool.execute('SELECT * FROM products WHERE id = ?', [req.params.id])
-    res.json(rows[0])
+    // Replace variants
+    await pool.execute('DELETE FROM product_variants WHERE productId = ?', [req.params.id])
+    for (const v of variants) {
+      await pool.execute(
+        'INSERT INTO product_variants (productId, color, size, stock) VALUES (?, ?, ?, ?)',
+        [req.params.id, v.color || '', v.size || '', parseInt(v.stock) || 0]
+      )
+    }
+    // Replace images only when new ones are provided
+    if (images.length > 0) {
+      await pool.execute('DELETE FROM product_images WHERE productId = ?', [req.params.id])
+      for (let i = 0; i < images.length; i++) {
+        await pool.execute(
+          'INSERT INTO product_images (productId, imageUrl, isPrimary, sortOrder) VALUES (?, ?, ?, ?)',
+          [req.params.id, images[i].url || images[i], i === 0 ? 1 : 0, i]
+        )
+      }
+    }
+
+    const [rows]     = await pool.execute('SELECT * FROM products WHERE id = ?', [req.params.id])
+    const [retVars]  = await pool.execute('SELECT * FROM product_variants WHERE productId = ? ORDER BY color, size', [req.params.id])
+    const [retImgs]  = await pool.execute('SELECT * FROM product_images WHERE productId = ? ORDER BY isPrimary DESC, sortOrder', [req.params.id])
+    res.json({ ...rows[0], variants: retVars, images: retImgs })
   } catch (err) {
     res.status(500).json({ error: err.message })
   }
@@ -761,11 +853,20 @@ app.post('/api/orders', async (req, res) => {
     for (const item of items) {
       await conn.execute(
         `INSERT INTO order_items
-          (orderId, productId, title, price, quantity, imageUrl, sellerUid, sellerName)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          (orderId, productId, title, price, quantity, imageUrl, sellerUid, sellerName, color, size)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [id, item.id || '', item.title || '', item.price, item.quantity,
-         item.imageUrl || '', item.sellerUid || '', item.sellerName || '']
+         item.imageUrl || '', item.sellerUid || '', item.sellerName || '',
+         item.color || '', item.size || '']
       )
+      // Reduce variant stock if a variant was selected
+      if ((item.color || item.size) && item.id) {
+        await conn.execute(
+          `UPDATE product_variants SET stock = GREATEST(0, stock - ?)
+           WHERE productId = ? AND color = ? AND size = ?`,
+          [item.quantity || 1, item.id, item.color || '', item.size || '']
+        )
+      }
     }
 
     for (const sUid of sellerUids) {
@@ -924,23 +1025,25 @@ app.get('/api/cart/:userId', async (req, res) => {
   }
 })
 
-// POST /api/cart — add item (upsert: increments quantity if product already in cart)
+// POST /api/cart — add item (upsert: increments quantity if same product+variant already in cart)
 app.post('/api/cart', async (req, res) => {
   const {
     userId, productId, title = '', price,
     imageUrl = '', sellerUid = '', sellerName = '', quantity = 1,
+    color = '', size = '',
   } = req.body
   if (!userId || !productId || price == null)
     return res.status(400).json({ error: 'userId, productId, price required' })
   try {
     await pool.execute(
-      `INSERT INTO cart (userId, productId, title, price, imageUrl, sellerUid, sellerName, quantity)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO cart (userId, productId, title, price, imageUrl, sellerUid, sellerName, quantity, color, size)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON DUPLICATE KEY UPDATE quantity = quantity + VALUES(quantity)`,
-      [userId, productId, title, price, imageUrl, sellerUid, sellerName, quantity]
+      [userId, productId, title, price, imageUrl, sellerUid, sellerName, quantity, color, size]
     )
     const [rows] = await pool.execute(
-      'SELECT * FROM cart WHERE userId = ? AND productId = ?', [userId, productId]
+      'SELECT * FROM cart WHERE userId = ? AND productId = ? AND color = ? AND size = ?',
+      [userId, productId, color, size]
     )
     res.json(rows[0])
   } catch (err) {

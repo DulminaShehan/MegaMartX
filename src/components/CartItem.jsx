@@ -21,23 +21,29 @@ const CartItem = ({ item }) => {
       <div style={s.info}>
         <p style={s.title}>{item.title}</p>
         <p style={s.seller}>Sold by {item.sellerName || 'MegaMartX'}</p>
+        {(item.color || item.size) && (
+          <div style={s.variantRow}>
+            {item.color && <span style={s.variantBadge}>{item.color}</span>}
+            {item.size  && <span style={s.variantBadge}>{item.size}</span>}
+          </div>
+        )}
         <p style={s.price}>{formatPrice(item.price)}</p>
       </div>
 
       {/* Qty */}
       <div style={s.qtyWrap}>
-        <button style={s.qtyBtn} onClick={() => updateQuantity(item.id, item.quantity - 1)}>
+        <button style={s.qtyBtn} onClick={() => updateQuantity(item.variantKey, item.quantity - 1)}>
           <FiMinus size={12} />
         </button>
         <span style={s.qty}>{item.quantity}</span>
-        <button style={s.qtyBtn} onClick={() => updateQuantity(item.id, item.quantity + 1)}>
+        <button style={s.qtyBtn} onClick={() => updateQuantity(item.variantKey, item.quantity + 1)}>
           <FiPlus size={12} />
         </button>
       </div>
 
       <span style={s.subtotal}>{formatPrice(item.price * item.quantity)}</span>
 
-      <button style={s.removeBtn} onClick={() => removeFromCart(item.id)} title="Remove">
+      <button style={s.removeBtn} onClick={() => removeFromCart(item.variantKey)} title="Remove">
         <FiTrash2 size={16} />
       </button>
     </div>
@@ -65,7 +71,14 @@ const s = {
     margin: '0 0 4px',
     overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
   },
-  seller: { color: '#888', fontSize: '12px', margin: '0 0 6px' },
+  seller: { color: '#888', fontSize: '12px', margin: '0 0 4px' },
+  variantRow: { display: 'flex', gap: '6px', marginBottom: '4px', flexWrap: 'wrap' },
+  variantBadge: {
+    background: '#e3f2fd', color: '#1565C0',
+    border: '1px solid #90caf9',
+    fontSize: '11px', fontWeight: 600,
+    padding: '2px 8px', borderRadius: '10px',
+  },
   price: { color: '#2196F3', fontSize: '14px', fontWeight: 700, margin: 0 },
 
   qtyWrap: {

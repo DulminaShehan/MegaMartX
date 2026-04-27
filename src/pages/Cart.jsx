@@ -52,7 +52,7 @@ const Cart = () => {
               <span style={s.listHeadText}>Products</span>
               <button style={s.clearBtn} onClick={clearCart}><FiTrash2 size={13} /> Clear All</button>
             </div>
-            <div style={s.items}>{cartItems.map(item => <CartItem key={item.id} item={item} />)}</div>
+            <div style={s.items}>{cartItems.map(item => <CartItem key={item.variantKey || item.id} item={item} />)}</div>
             <Link to="/shop" style={s.continueShopping}><FiArrowLeft size={13} /> Continue Shopping</Link>
           </div>
 

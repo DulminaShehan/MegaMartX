@@ -171,6 +171,8 @@ const CheckoutForm = () => {
         imageUrl:   i.imageUrl   || '',
         sellerUid:  i.sellerUid  || '',
         sellerName: i.sellerName || '',
+        color:      i.color      || '',
+        size:       i.size       || '',
       })),
       sellerUids: [...new Set(cartItems.map(i => i.sellerUid).filter(Boolean))],
       subtotal: cartTotal,

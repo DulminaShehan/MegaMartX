@@ -314,6 +314,16 @@ const OrderDetails = () => {
                       <p style={s.itemMeta}>
                         Sold by <strong>{item.sellerName || 'MegaMartX'}</strong>
                       </p>
+                      {(item.color || item.size) && (
+                        <div style={{ display: 'flex', gap: '6px', margin: '4px 0', flexWrap: 'wrap' }}>
+                          {item.color && (
+                            <span style={s.variantBadge}>{item.color}</span>
+                          )}
+                          {item.size && (
+                            <span style={s.variantBadge}>{item.size}</span>
+                          )}
+                        </div>
+                      )}
                       <p style={s.itemMeta}>Qty: {item.quantity}</p>
                       {order.status === 'delivered' && (
                         <ReviewPanel
@@ -508,6 +518,13 @@ const s = {
   itemInfo:       { flex: 1, minWidth: 0 },
   itemTitle:      { color: '#000', fontSize: '13px', fontWeight: 600, margin: '0 0 4px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   itemMeta:       { color: '#888', fontSize: '12px', margin: '2px 0 0' },
+  variantBadge: {
+    display: 'inline-block',
+    background: '#e3f2fd', color: '#1565C0',
+    border: '1px solid #90caf9',
+    fontSize: '11px', fontWeight: 600,
+    padding: '2px 8px', borderRadius: '10px',
+  },
   itemPriceWrap:  { textAlign: 'right', flexShrink: 0 },
   itemUnitPrice:  { color: '#888', fontSize: '11px', margin: '0 0 3px' },
   itemTotal:      { color: '#2196F3', fontSize: '14px', fontWeight: 800, margin: 0 },

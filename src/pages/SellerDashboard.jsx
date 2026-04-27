@@ -19,6 +19,7 @@ import {
   addProduct, updateProduct, deleteProduct,
   getSellerProducts, getSellerOrders, updateOrderStatus,
   getStoreProfile, updateStoreProfile, getSellerAnalytics,
+  getProductById, uploadMultipleImages,
 } from '../firebase/firestore'
 import { useAuth } from '../context/AuthContext'
 import { formatPrice, formatDate, CATEGORIES, STATUS_COLORS, imgFallback } from '../utils/helpers'
@@ -29,7 +30,17 @@ const API    = import.meta.env.VITE_API_URL || 'http://localhost:5000'
 const CATS   = CATEGORIES.filter(c => c !== 'All')
 
 // ── Blank form state ──────────────────────────────────────────
-const BLANK = { name: '', description: '', category: 'Electronics', price: '', discount: '', stock: '' }
+const BLANK = {
+  name: '', description: '', category: 'Electronics',
+  price: '', discount: '', stock: '',
+  colors: [],         // e.g. ['Red', 'Blue']
+  sizes:  [],         // e.g. ['S', 'M', 'L']
+  variantStocks: {},  // { 'Red|S': 5, 'Red|M': 3, ... }
+}
+
+const PRESET_COLORS = ['Black', 'White', 'Red', 'Blue', 'Green', 'Yellow', 'Pink', 'Gray', 'Purple', 'Orange', 'Brown', 'Navy']
+const PRESET_SIZES_CLOTHING = ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXXL']
+const PRESET_SIZES_SHOE     = ['36', '37', '38', '39', '40', '41', '42', '43', '44', '45']
 
 // ── Nav items ─────────────────────────────────────────────────
 const NAV = [
@@ -59,11 +70,16 @@ const SellerDashboard = () => {
   const [saving,  setSaving]      = useState(false)
   const [editItem, setEditItem]   = useState(null)
   const [form, setForm]           = useState(BLANK)
-  const [imgFile, setImgFile]     = useState(null)
-  const [preview, setPreview]     = useState('')
-  const [dragOver, setDragOver]   = useState(false)
+  const [imgFiles, setImgFiles]   = useState([null, null, null])   // up to 3 files
+  const [previews, setPreviews]   = useState(['', '', ''])          // URL previews
+  const [dragOver, setDragOver]   = useState(null)                  // slot index
   const [expanded, setExpanded]   = useState(null)
-  const fileRef = useRef(null)
+  const [colorInput, setColorInput] = useState('')
+  const [sizeInput, setSizeInput]   = useState('')
+  const fileRef0 = useRef(null)
+  const fileRef1 = useRef(null)
+  const fileRef2 = useRef(null)
+  const fileRefs = [fileRef0, fileRef1, fileRef2]
 
   // Storefront state
   const [storeForm, setStoreForm]   = useState({ storeName: '', bio: '', bannerUrl: '', location: '' })
@@ -98,57 +114,159 @@ const SellerDashboard = () => {
   }
 
   // ── Image helpers ───────────────────────────────────────────
-  const processImage = (file) => {
+  const processImage = (slot, file) => {
     if (!file) return
     if (!file.type.startsWith('image/')) { toast.error('Select an image file'); return }
     if (file.size > 5 * 1024 * 1024)    { toast.error('Image must be under 5 MB'); return }
-    setImgFile(file)
-    setPreview(URL.createObjectURL(file))
+    setImgFiles(prev => { const n = [...prev]; n[slot] = file; return n })
+    setPreviews(prev => { const n = [...prev]; n[slot] = URL.createObjectURL(file); return n })
   }
-  const onFilePick  = e  => processImage(e.target.files[0])
-  const onDrop      = e  => { e.preventDefault(); setDragOver(false); processImage(e.dataTransfer.files[0]) }
-  const onDragOver  = e  => { e.preventDefault(); setDragOver(true) }
-  const onDragLeave = () => setDragOver(false)
+  const onFilePick  = (slot, e) => processImage(slot, e.target.files[0])
+  const onDrop      = (slot, e) => { e.preventDefault(); setDragOver(null); processImage(slot, e.dataTransfer.files[0]) }
+  const onDragOver  = (slot, e) => { e.preventDefault(); setDragOver(slot) }
+  const onDragLeave = () => setDragOver(null)
+  const removeSlot  = (slot) => {
+    setImgFiles(prev  => { const n = [...prev];  n[slot] = null; return n })
+    setPreviews(prev => { const n = [...prev]; n[slot] = '';   return n })
+  }
+
+  // ── Color helpers ────────────────────────────────────────────
+  const addColor = (c) => {
+    const val = (c || colorInput).trim()
+    if (!val) return
+    if (form.colors.includes(val)) { setColorInput(''); return }
+    setForm(f => ({ ...f, colors: [...f.colors, val] }))
+    setColorInput('')
+  }
+  const removeColor = (c) => {
+    setForm(f => {
+      const newStocks = { ...f.variantStocks }
+      f.sizes.forEach(sz => { delete newStocks[`${c}|${sz}`] })
+      return { ...f, colors: f.colors.filter(x => x !== c), variantStocks: newStocks }
+    })
+  }
+
+  // ── Size helpers ─────────────────────────────────────────────
+  const addSize = (sz) => {
+    const val = (sz || sizeInput).trim()
+    if (!val) return
+    if (form.sizes.includes(val)) { setSizeInput(''); return }
+    setForm(f => ({ ...f, sizes: [...f.sizes, val] }))
+    setSizeInput('')
+  }
+  const removeSize = (sz) => {
+    setForm(f => {
+      const newStocks = { ...f.variantStocks }
+      f.colors.forEach(c => { delete newStocks[`${c}|${sz}`] })
+      return { ...f, sizes: f.sizes.filter(x => x !== sz), variantStocks: newStocks }
+    })
+  }
+
+  const setVariantStock = (color, size, val) => {
+    setForm(f => ({
+      ...f,
+      variantStocks: { ...f.variantStocks, [`${color}|${size}`]: val },
+    }))
+  }
 
   // ── Open edit form ──────────────────────────────────────────
-  const openEdit = (p) => {
+  const openEdit = async (p) => {
     setEditItem(p)
-    setForm({
-      name:        p.title || '',
-      description: p.description || '',
-      category:    p.category || 'Electronics',
-      price:       p.price || '',
-      discount:    p.discount || '',
-      stock:       p.stock || '',
-    })
-    setPreview(p.imageUrl || '')
-    setImgFile(null)
     setView('add')
+    // Fetch full product (with variants + images)
+    try {
+      const full = await getProductById(p.id)
+      const colors = [...new Set((full.variants || []).map(v => v.color).filter(Boolean))]
+      const sizes  = [...new Set((full.variants || []).map(v => v.size).filter(Boolean))]
+      const variantStocks = {}
+      for (const v of (full.variants || [])) {
+        if (v.color !== undefined && v.size !== undefined) {
+          variantStocks[`${v.color}|${v.size}`] = String(v.stock)
+        }
+      }
+      const imgUrls = (full.images || []).map(img => img.imageUrl)
+      while (imgUrls.length < 3) imgUrls.push('')
+      setPreviews(imgUrls.slice(0, 3))
+      setImgFiles([null, null, null])
+      setForm({
+        name:        full.title       || '',
+        description: full.description || '',
+        category:    full.category    || 'Electronics',
+        price:       full.price       || '',
+        discount:    full.discount    || '',
+        stock:       full.stock       || '',
+        colors,
+        sizes,
+        variantStocks,
+      })
+    } catch {
+      // fallback without variant data
+      setPreviews([p.imageUrl || '', '', ''])
+      setImgFiles([null, null, null])
+      setForm({
+        name:        p.title       || '',
+        description: p.description || '',
+        category:    p.category    || 'Electronics',
+        price:       p.price       || '',
+        discount:    p.discount    || '',
+        stock:       p.stock       || '',
+        colors: [], sizes: [], variantStocks: {},
+      })
+    }
   }
 
-  const resetForm = () => { setForm(BLANK); setEditItem(null); setImgFile(null); setPreview('') }
+  const resetForm = () => {
+    setForm(BLANK)
+    setEditItem(null)
+    setImgFiles([null, null, null])
+    setPreviews(['', '', ''])
+    setColorInput('')
+    setSizeInput('')
+  }
 
   // ── Save product ────────────────────────────────────────────
   const handleSubmit = async (e) => {
     e.preventDefault()
-    if (!form.name.trim())               { toast.error('Product name is required');    return }
-    if (!form.description.trim())        { toast.error('Description is required');     return }
-    if (!form.price || isNaN(form.price)){ toast.error('Enter a valid price');         return }
-    if (!imgFile && !preview)            { toast.error('Upload a product image');      return }
+    if (!form.name.trim())               { toast.error('Product name is required'); return }
+    if (!form.description.trim())        { toast.error('Description is required');  return }
+    if (!form.price || isNaN(form.price)){ toast.error('Enter a valid price');      return }
+    if (previews.every(p => !p) && imgFiles.every(f => !f)) {
+      toast.error('Upload at least one product image'); return
+    }
 
     setSaving(true)
     try {
-      // Upload image via multer if a new file was chosen
-      let imageUrl = preview
-      if (imgFile) {
-        const fd = new FormData()
-        fd.append('image', imgFile)
-        const { data } = await axios.post(`${API}/api/upload`, fd, {
-          headers: { 'Content-Type': 'multipart/form-data' },
-        })
-        imageUrl = data.url
+      // Upload any new files
+      const newFiles = imgFiles.filter(Boolean)
+      let uploadedUrls = []
+      if (newFiles.length > 0) {
+        const result = await uploadMultipleImages(newFiles)
+        uploadedUrls = result.urls || []
       }
 
+      // Build final images array: slot order preserved
+      const finalImages = []
+      let uploadIdx = 0
+      for (let i = 0; i < 3; i++) {
+        if (imgFiles[i]) {
+          if (uploadedUrls[uploadIdx]) {
+            finalImages.push({ url: uploadedUrls[uploadIdx] })
+            uploadIdx++
+          }
+        } else if (previews[i]) {
+          finalImages.push({ url: previews[i] })
+        }
+      }
+
+      // Build variants
+      const variants = []
+      for (const c of form.colors) {
+        for (const sz of form.sizes) {
+          variants.push({ color: c, size: sz, stock: parseInt(form.variantStocks[`${c}|${sz}`]) || 0 })
+        }
+      }
+
+      const primaryImageUrl = finalImages[0]?.url || ''
       const fp = calcFinal()
       const payload = {
         title:         form.name.trim(),
@@ -160,10 +278,12 @@ const SellerDashboard = () => {
         discount:      parseFloat(form.discount) || 0,
         finalPrice:    fp,
         stock:         parseInt(form.stock) || 0,
-        imageUrl,
+        imageUrl:      primaryImageUrl,
         sellerUid:     currentUser.uid,
         sellerName:    userProfile?.name  || currentUser.displayName || 'Seller',
         storeName:     userProfile?.storeName || '',
+        variants,
+        images: finalImages,
       }
 
       if (editItem) {
@@ -179,7 +299,7 @@ const SellerDashboard = () => {
       setView('products')
     } catch (err) {
       console.error(err)
-      toast.error(err.response?.data?.error || 'Failed to save. Try again.')
+      toast.error(err.message || 'Failed to save. Try again.')
     } finally {
       setSaving(false)
     }
@@ -251,12 +371,12 @@ const SellerDashboard = () => {
   const onDiscount     = products.filter(p => parseFloat(p.discount) > 0).length
 
   return (
-    <div style={s.root}>
+    <div style={s.root} className="sd-root">
 
       {/* ══════════════════════════════════════════════════
           SIDEBAR
       ══════════════════════════════════════════════════ */}
-      <aside style={s.sidebar}>
+      <aside style={s.sidebar} className="sd-sidebar">
 
         {/* Brand */}
         <div style={s.brand}>
@@ -380,37 +500,60 @@ const SellerDashboard = () => {
 
             <form onSubmit={handleSubmit} style={s.form}>
 
-              {/* ── Image upload ── */}
+              {/* ── Multi-image upload ── */}
               <div style={s.formCard}>
-                <div style={s.cardHead}><FiImage size={15} /> Product Image</div>
-
-                <div
-                  style={{ ...s.dropZone, ...(dragOver ? s.dropZoneActive : {}) }}
-                  onClick={() => fileRef.current?.click()}
-                  onDrop={onDrop}
-                  onDragOver={onDragOver}
-                  onDragLeave={onDragLeave}
-                >
-                  {preview ? (
-                    <div style={s.previewWrap}>
-                      <img src={preview} alt="preview" style={s.previewImg} />
-                      <button
-                        type="button"
-                        style={s.removeImg}
-                        onClick={e => { e.stopPropagation(); setPreview(''); setImgFile(null) }}
+                <div style={s.cardHead}><FiImage size={15} /> Product Images (up to 3)</div>
+                <p style={{ color: '#888', fontSize: '12px', margin: '0 0 14px' }}>
+                  First image is the main/primary image shown on listings.
+                </p>
+                <div style={s.imgSlotsRow}>
+                  {[0, 1, 2].map(slot => (
+                    <div key={slot} style={{ flex: 1 }}>
+                      {slot === 0 && (
+                        <div style={s.primaryBadge}>Main Image</div>
+                      )}
+                      <div
+                        style={{
+                          ...s.dropZone,
+                          ...(dragOver === slot ? s.dropZoneActive : {}),
+                          minHeight: '130px',
+                        }}
+                        onClick={() => fileRefs[slot].current?.click()}
+                        onDrop={e => onDrop(slot, e)}
+                        onDragOver={e => onDragOver(slot, e)}
+                        onDragLeave={onDragLeave}
                       >
-                        <FiX size={14} />
-                      </button>
+                        {previews[slot] ? (
+                          <div style={s.previewWrap}>
+                            <img src={previews[slot]} alt={`Image ${slot + 1}`} style={s.previewImg} />
+                            <button
+                              type="button"
+                              style={s.removeImg}
+                              onClick={e => { e.stopPropagation(); removeSlot(slot) }}
+                            >
+                              <FiX size={13} />
+                            </button>
+                          </div>
+                        ) : (
+                          <div style={s.dropContent}>
+                            <FiUpload size={22} color="#90caf9" />
+                            <p style={{ ...s.dropText, fontSize: '12px' }}>
+                              {slot === 0 ? 'Main image' : `Image ${slot + 1}`}
+                            </p>
+                            <p style={s.dropHint}>PNG/JPG/WEBP · 5 MB</p>
+                          </div>
+                        )}
+                      </div>
+                      <input
+                        ref={fileRefs[slot]}
+                        type="file"
+                        accept="image/*"
+                        style={{ display: 'none' }}
+                        onChange={e => onFilePick(slot, e)}
+                      />
                     </div>
-                  ) : (
-                    <div style={s.dropContent}>
-                      <FiUpload size={28} color="#90caf9" />
-                      <p style={s.dropText}>Click or drag &amp; drop to upload</p>
-                      <p style={s.dropHint}>PNG, JPG, WEBP — max 5 MB</p>
-                    </div>
-                  )}
+                  ))}
                 </div>
-                <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={onFilePick} />
               </div>
 
               {/* ── Product info ── */}
@@ -463,7 +606,9 @@ const SellerDashboard = () => {
                   </div>
 
                   <div style={s.field}>
-                    <label style={s.label}>Stock Quantity</label>
+                    <label style={s.label}>
+                      Base Stock {form.colors.length > 0 && form.sizes.length > 0 ? '(set per-variant below)' : ''}
+                    </label>
                     <input
                       style={s.input}
                       type="number"
@@ -517,7 +662,6 @@ const SellerDashboard = () => {
                     </div>
                   </div>
 
-                  {/* Final price preview */}
                   {calcFinal() !== null && (
                     <div style={{ ...s.field, gridColumn: '1 / -1' }}>
                       <div style={s.finalPriceBox}>
@@ -532,14 +676,159 @@ const SellerDashboard = () => {
                           </span>
                         )}
                       </div>
-                      <div style={s.formulaNote}>
-                        Final Price = Price − (Price × Discount / 100)
-                      </div>
+                      <div style={s.formulaNote}>Final Price = Price − (Price × Discount / 100)</div>
                     </div>
                   )}
 
                 </div>
               </div>
+
+              {/* ── Colors ── */}
+              <div style={s.formCard}>
+                <div style={s.cardHead}><FiTag size={15} /> Colors (optional)</div>
+                {/* Presets */}
+                <div style={s.presetRow}>
+                  {PRESET_COLORS.map(c => (
+                    <button
+                      key={c} type="button"
+                      style={{
+                        ...s.presetChip,
+                        background: form.colors.includes(c) ? '#2196F3' : '#e3f2fd',
+                        color:      form.colors.includes(c) ? '#fff'    : '#1565C0',
+                        border:     form.colors.includes(c) ? '1.5px solid #2196F3' : '1.5px solid #90caf9',
+                      }}
+                      onClick={() => form.colors.includes(c) ? removeColor(c) : addColor(c)}
+                    >
+                      {c}
+                    </button>
+                  ))}
+                </div>
+                {/* Custom input */}
+                <div style={s.tagInputRow}>
+                  <input
+                    style={{ ...s.input, flex: 1 }}
+                    placeholder="Custom color…"
+                    value={colorInput}
+                    onChange={e => setColorInput(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), addColor())}
+                  />
+                  <button type="button" style={s.tagAddBtn} onClick={() => addColor()}>Add</button>
+                </div>
+                {/* Selected chips */}
+                {form.colors.length > 0 && (
+                  <div style={s.chipRow}>
+                    {form.colors.map(c => (
+                      <span key={c} style={s.chip}>
+                        {c}
+                        <button type="button" style={s.chipX} onClick={() => removeColor(c)}><FiX size={11} /></button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* ── Sizes ── */}
+              <div style={s.formCard}>
+                <div style={s.cardHead}><FiBox size={15} /> Sizes (optional)</div>
+                {/* Clothing presets */}
+                <p style={{ color: '#888', fontSize: '11px', margin: '0 0 6px', fontWeight: 600 }}>CLOTHING</p>
+                <div style={s.presetRow}>
+                  {PRESET_SIZES_CLOTHING.map(sz => (
+                    <button
+                      key={sz} type="button"
+                      style={{
+                        ...s.presetChip,
+                        background: form.sizes.includes(sz) ? '#2196F3' : '#e3f2fd',
+                        color:      form.sizes.includes(sz) ? '#fff'    : '#1565C0',
+                        border:     form.sizes.includes(sz) ? '1.5px solid #2196F3' : '1.5px solid #90caf9',
+                      }}
+                      onClick={() => form.sizes.includes(sz) ? removeSize(sz) : addSize(sz)}
+                    >
+                      {sz}
+                    </button>
+                  ))}
+                </div>
+                {/* Shoe presets */}
+                <p style={{ color: '#888', fontSize: '11px', margin: '10px 0 6px', fontWeight: 600 }}>SHOES / EU</p>
+                <div style={s.presetRow}>
+                  {PRESET_SIZES_SHOE.map(sz => (
+                    <button
+                      key={sz} type="button"
+                      style={{
+                        ...s.presetChip,
+                        background: form.sizes.includes(sz) ? '#2196F3' : '#e3f2fd',
+                        color:      form.sizes.includes(sz) ? '#fff'    : '#1565C0',
+                        border:     form.sizes.includes(sz) ? '1.5px solid #2196F3' : '1.5px solid #90caf9',
+                      }}
+                      onClick={() => form.sizes.includes(sz) ? removeSize(sz) : addSize(sz)}
+                    >
+                      {sz}
+                    </button>
+                  ))}
+                </div>
+                {/* Custom input */}
+                <div style={{ ...s.tagInputRow, marginTop: '10px' }}>
+                  <input
+                    style={{ ...s.input, flex: 1 }}
+                    placeholder="Custom size…"
+                    value={sizeInput}
+                    onChange={e => setSizeInput(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), addSize())}
+                  />
+                  <button type="button" style={s.tagAddBtn} onClick={() => addSize()}>Add</button>
+                </div>
+                {form.sizes.length > 0 && (
+                  <div style={s.chipRow}>
+                    {form.sizes.map(sz => (
+                      <span key={sz} style={s.chip}>
+                        {sz}
+                        <button type="button" style={s.chipX} onClick={() => removeSize(sz)}><FiX size={11} /></button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* ── Variant stock grid ── */}
+              {form.colors.length > 0 && form.sizes.length > 0 && (
+                <div style={s.formCard}>
+                  <div style={s.cardHead}><FiAlertCircle size={15} /> Inventory by Variant</div>
+                  <p style={{ color: '#888', fontSize: '12px', margin: '0 0 14px' }}>
+                    Set stock for each color × size combination.
+                  </p>
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={s.variantTable}>
+                      <thead>
+                        <tr>
+                          <th style={s.vth}>Color \ Size</th>
+                          {form.sizes.map(sz => <th key={sz} style={s.vth}>{sz}</th>)}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {form.colors.map(c => (
+                          <tr key={c}>
+                            <td style={s.vtd}>
+                              <span style={s.colorCell}>{c}</span>
+                            </td>
+                            {form.sizes.map(sz => (
+                              <td key={sz} style={s.vtd}>
+                                <input
+                                  style={s.stockInput}
+                                  type="number"
+                                  min="0"
+                                  placeholder="0"
+                                  value={form.variantStocks[`${c}|${sz}`] || ''}
+                                  onChange={e => setVariantStock(c, sz, e.target.value)}
+                                />
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
 
               {/* Action buttons */}
               <div style={s.formActions}>
@@ -1145,27 +1434,87 @@ const s = {
   },
   formulaNote: { color: '#aaa', fontSize: '11px', marginTop: '4px' },
 
-  // Drop zone
+  // Drop zone — multi-image
+  imgSlotsRow: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' },
+  primaryBadge: {
+    background: '#2196F3', color: '#fff',
+    fontSize: '10px', fontWeight: 700,
+    padding: '2px 8px', borderRadius: '6px',
+    marginBottom: '6px', display: 'inline-block',
+    textTransform: 'uppercase', letterSpacing: '0.5px',
+  },
   dropZone: {
     border: '2px dashed #bbdefb', borderRadius: '12px',
     background: '#f0f8ff', cursor: 'pointer',
-    minHeight: '160px', display: 'flex',
+    minHeight: '130px', display: 'flex',
     alignItems: 'center', justifyContent: 'center',
     transition: 'border-color .2s, background .2s',
   },
   dropZoneActive: { borderColor: '#2196F3', background: '#e3f2fd' },
-  dropContent: { textAlign: 'center', padding: '20px' },
-  dropText:    { color: '#555', fontSize: '14px', margin: '10px 0 4px', fontWeight: 500 },
-  dropHint:    { color: '#aaa', fontSize: '12px', margin: 0 },
-  previewWrap: { position: 'relative', width: '100%', maxWidth: '340px' },
-  previewImg:  { width: '100%', maxHeight: '200px', objectFit: 'cover', borderRadius: '8px', display: 'block' },
+  dropContent: { textAlign: 'center', padding: '16px' },
+  dropText:    { color: '#555', fontSize: '13px', margin: '8px 0 4px', fontWeight: 500 },
+  dropHint:    { color: '#aaa', fontSize: '11px', margin: 0 },
+  previewWrap: { position: 'relative', width: '100%' },
+  previewImg:  { width: '100%', height: '120px', objectFit: 'cover', borderRadius: '8px', display: 'block' },
   removeImg: {
-    position: 'absolute', top: '8px', right: '8px',
+    position: 'absolute', top: '6px', right: '6px',
     background: 'rgba(0,0,0,0.6)', color: '#fff',
     border: 'none', borderRadius: '50%',
-    width: '26px', height: '26px',
+    width: '24px', height: '24px',
     display: 'flex', alignItems: 'center', justifyContent: 'center',
     cursor: 'pointer',
+  },
+
+  // Color/size selectors
+  presetRow:   { display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '12px' },
+  presetChip: {
+    padding: '5px 12px', borderRadius: '20px',
+    fontSize: '13px', fontWeight: 600, cursor: 'pointer',
+    transition: 'all .15s',
+  },
+  tagInputRow: { display: 'flex', gap: '8px', marginBottom: '12px' },
+  tagAddBtn: {
+    padding: '10px 18px', background: '#2196F3', color: '#fff',
+    border: 'none', borderRadius: '8px', fontSize: '13px',
+    fontWeight: 600, cursor: 'pointer', flexShrink: 0,
+  },
+  chipRow:  { display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '4px' },
+  chip: {
+    display: 'inline-flex', alignItems: 'center', gap: '6px',
+    background: '#e3f2fd', color: '#1565C0',
+    border: '1px solid #90caf9',
+    fontSize: '13px', fontWeight: 600,
+    padding: '4px 10px', borderRadius: '20px',
+  },
+  chipX: {
+    background: 'none', border: 'none', cursor: 'pointer',
+    color: '#1565C0', display: 'flex', padding: 0, lineHeight: 1,
+  },
+
+  // Variant stock table
+  variantTable: {
+    borderCollapse: 'collapse', width: '100%',
+    fontSize: '13px', minWidth: '300px',
+  },
+  vth: {
+    background: '#f0f8ff', color: '#555',
+    fontWeight: 700, fontSize: '12px',
+    padding: '10px 12px', textAlign: 'center',
+    border: '1px solid #e3f2fd',
+  },
+  vtd: {
+    padding: '8px 10px', border: '1px solid #e3f2fd',
+    textAlign: 'center',
+  },
+  colorCell: {
+    display: 'inline-block', padding: '3px 10px',
+    background: '#e3f2fd', color: '#1565C0',
+    borderRadius: '10px', fontSize: '12px', fontWeight: 700,
+  },
+  stockInput: {
+    width: '64px', padding: '6px 8px', textAlign: 'center',
+    background: '#f0f8ff', border: '1.5px solid #bbdefb',
+    borderRadius: '8px', fontSize: '13px', color: '#000',
   },
 
   formActions: { display: 'flex', gap: '12px', justifyContent: 'flex-end', paddingTop: '4px' },

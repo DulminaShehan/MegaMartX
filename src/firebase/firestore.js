@@ -112,6 +112,8 @@ export const addToCartDB = (userId, product, quantity = 1) =>
     sellerUid:  product.sellerUid  || '',
     sellerName: product.sellerName || '',
     quantity,
+    color:      product.color      || '',
+    size:       product.size       || '',
   })
 
 /** Set an exact quantity for a cart row (uses the DB row id, not productId) */
@@ -220,3 +222,21 @@ export const deleteNotification = (uid, id) =>
 
 export const getSellerAnalytics = (uid) =>
   api('GET', `/api/analytics/seller/${encodeURIComponent(uid)}`)
+
+// ─── MULTI-IMAGE UPLOAD ───────────────────────────────────────
+
+export const uploadMultipleImages = async (files) => {
+  const token = localStorage.getItem('megamartx_token')
+  const fd = new FormData()
+  files.forEach(f => fd.append('images', f))
+  const res = await fetch(`${BASE}/api/upload-multiple`, {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: fd,
+  })
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}))
+    throw new Error(data.error || 'Image upload failed')
+  }
+  return res.json()  // { urls: [...] }
+}
