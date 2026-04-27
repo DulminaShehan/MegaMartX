@@ -417,7 +417,7 @@ const SellerDashboard = () => {
         </nav>
 
         {/* Logout at bottom */}
-        <button style={s.logoutBtn} onClick={logout}>
+        <button style={s.logoutBtn} className="sd-logout" onClick={logout}>
           <FiLogOut size={15} /> Sign Out
         </button>
       </aside>
