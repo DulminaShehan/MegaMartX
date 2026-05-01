@@ -280,7 +280,7 @@ const CheckoutForm = () => {
           <p style={s.sub}>{cartItems.length} item{cartItems.length !== 1 ? 's' : ''}</p>
         </div>
 
-        <div style={s.layout}>
+        <div style={s.layout} className="co-layout">
 
           {/* ════════════ LEFT — FORM ════════════ */}
           <div style={s.formCol}>
@@ -467,7 +467,7 @@ const CheckoutForm = () => {
           </div>
 
           {/* ════════════ RIGHT — ORDER SUMMARY ════════════ */}
-          <div style={s.summary}>
+          <div style={s.summary} className="co-summary">
             <h3 style={s.summaryTitle}>
               <FiShoppingBag size={15} style={{ color: '#2196F3', verticalAlign: 'middle', marginRight: '6px' }} />
               Order Summary

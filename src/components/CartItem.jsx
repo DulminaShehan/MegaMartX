@@ -10,7 +10,7 @@ const CartItem = ({ item }) => {
   const { updateQuantity, removeFromCart } = useCart()
 
   return (
-    <div style={s.row}>
+    <div style={s.row} className="cart-item-row">
       <img
         src={item.imageUrl || imgFallback(100, 100)}
         alt={item.title}
@@ -30,22 +30,24 @@ const CartItem = ({ item }) => {
         <p style={s.price}>{formatPrice(item.price)}</p>
       </div>
 
-      {/* Qty */}
-      <div style={s.qtyWrap}>
-        <button style={s.qtyBtn} onClick={() => updateQuantity(item.variantKey, item.quantity - 1)}>
-          <FiMinus size={12} />
-        </button>
-        <span style={s.qty}>{item.quantity}</span>
-        <button style={s.qtyBtn} onClick={() => updateQuantity(item.variantKey, item.quantity + 1)}>
-          <FiPlus size={12} />
+      <div className="cart-item-right" style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+        {/* Qty */}
+        <div style={s.qtyWrap}>
+          <button style={s.qtyBtn} onClick={() => updateQuantity(item.variantKey, item.quantity - 1)}>
+            <FiMinus size={12} />
+          </button>
+          <span style={s.qty}>{item.quantity}</span>
+          <button style={s.qtyBtn} onClick={() => updateQuantity(item.variantKey, item.quantity + 1)}>
+            <FiPlus size={12} />
+          </button>
+        </div>
+
+        <span style={s.subtotal}>{formatPrice(item.price * item.quantity)}</span>
+
+        <button style={s.removeBtn} onClick={() => removeFromCart(item.variantKey)} title="Remove">
+          <FiTrash2 size={16} />
         </button>
       </div>
-
-      <span style={s.subtotal}>{formatPrice(item.price * item.quantity)}</span>
-
-      <button style={s.removeBtn} onClick={() => removeFromCart(item.variantKey)} title="Remove">
-        <FiTrash2 size={16} />
-      </button>
     </div>
   )
 }

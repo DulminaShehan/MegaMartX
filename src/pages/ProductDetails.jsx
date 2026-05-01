@@ -154,6 +154,10 @@ const ProductDetails = () => {
   }
 
   const handleAddToCart = () => {
+    if (!currentUser) {
+      toast.error('Please sign in to add items to your cart')
+      return navigate('/login', { state: { from: { pathname: `/product/${id}` } } })
+    }
     const variants = product?.variants || []
     const hasVariants = variants.length > 0
     if (hasVariants) {

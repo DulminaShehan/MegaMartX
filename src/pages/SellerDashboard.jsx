@@ -425,7 +425,7 @@ const SellerDashboard = () => {
       {/* ══════════════════════════════════════════════════
           MAIN CONTENT
       ══════════════════════════════════════════════════ */}
-      <main style={s.main}>
+      <main style={s.main} className="sd-main">
 
         {/* ── Dashboard home ── */}
         {view === 'dashboard' && (
@@ -457,11 +457,11 @@ const SellerDashboard = () => {
             </div>
 
             {/* Quick actions */}
-            <div style={s.quickRow}>
-              <button style={s.quickBtn} onClick={() => { resetForm(); setView('add') }}>
+            <div style={s.quickRow} className="sd-quick-row">
+              <button style={s.quickBtn} className="sd-quick-btn" onClick={() => { resetForm(); setView('add') }}>
                 <FiPlus size={16} /> Add New Product
               </button>
-              <button style={{ ...s.quickBtn, ...s.quickBtnOutline }} onClick={() => setView('orders')}>
+              <button style={{ ...s.quickBtn, ...s.quickBtnOutline }} className="sd-quick-btn" onClick={() => setView('orders')}>
                 <FiShoppingBag size={16} /> View Orders
               </button>
             </div>
@@ -470,7 +470,7 @@ const SellerDashboard = () => {
             {products.length > 0 && (
               <div style={s.section}>
                 <h3 style={s.sectionTitle}>Recent Products</h3>
-                <div style={s.recentGrid}>
+                <div style={s.recentGrid} className="sd-recent-grid">
                   {products.slice(0, 4).map(p => (
                     <div key={p.id} style={s.recentCard}>
                       <img
@@ -499,7 +499,7 @@ const SellerDashboard = () => {
               <p style={s.pageSub}>{editItem ? `Editing: ${editItem.title}` : 'Fill in the details below'}</p>
             </div>
 
-            <form onSubmit={handleSubmit} style={s.form}>
+            <form onSubmit={handleSubmit} style={s.form} className="sd-form">
 
               {/* ── Multi-image upload ── */}
               <div style={s.formCard}>
@@ -507,7 +507,7 @@ const SellerDashboard = () => {
                 <p style={{ color: '#888', fontSize: '12px', margin: '0 0 14px' }}>
                   First image is the main/primary image shown on listings.
                 </p>
-                <div style={s.imgSlotsRow}>
+                <div style={s.imgSlotsRow} className="sd-img-slots">
                   {[0, 1, 2].map(slot => (
                     <div key={slot} style={{ flex: 1 }}>
                       {slot === 0 && (
@@ -560,7 +560,7 @@ const SellerDashboard = () => {
               {/* ── Product info ── */}
               <div style={s.formCard}>
                 <div style={s.cardHead}><FiInfo size={15} /> Product Information</div>
-                <div style={s.formGrid}>
+                <div style={s.formGrid} className="sd-form-grid">
 
                   <div style={{ gridColumn: '1 / -1', ...s.field }}>
                     <label style={s.label}>Product Name <span style={s.req}>*</span></label>
@@ -593,7 +593,7 @@ const SellerDashboard = () => {
               {/* ── Category & Stock ── */}
               <div style={s.formCard}>
                 <div style={s.cardHead}><FiLayers size={15} /> Category &amp; Stock</div>
-                <div style={s.formGrid}>
+                <div style={s.formGrid} className="sd-form-grid">
 
                   <div style={s.field}>
                     <label style={s.label}>Category <span style={s.req}>*</span></label>
@@ -627,7 +627,7 @@ const SellerDashboard = () => {
               {/* ── Pricing & Discount ── */}
               <div style={s.formCard}>
                 <div style={s.cardHead}><FiDollarSign size={15} /> Pricing &amp; Discount</div>
-                <div style={s.formGrid}>
+                <div style={s.formGrid} className="sd-form-grid">
 
                   <div style={s.field}>
                     <label style={s.label}>Price (USD) <span style={s.req}>*</span></label>
@@ -688,7 +688,7 @@ const SellerDashboard = () => {
               <div style={s.formCard}>
                 <div style={s.cardHead}><FiTag size={15} /> Colors (optional)</div>
                 {/* Presets */}
-                <div style={s.presetRow}>
+                <div style={s.presetRow} className="sd-preset-row">
                   {PRESET_COLORS.map(c => (
                     <button
                       key={c} type="button"
@@ -733,7 +733,7 @@ const SellerDashboard = () => {
                 <div style={s.cardHead}><FiBox size={15} /> Sizes (optional)</div>
                 {/* Clothing presets */}
                 <p style={{ color: '#888', fontSize: '11px', margin: '0 0 6px', fontWeight: 600 }}>CLOTHING</p>
-                <div style={s.presetRow}>
+                <div style={s.presetRow} className="sd-preset-row">
                   {PRESET_SIZES_CLOTHING.map(sz => (
                     <button
                       key={sz} type="button"
@@ -751,7 +751,7 @@ const SellerDashboard = () => {
                 </div>
                 {/* Shoe presets */}
                 <p style={{ color: '#888', fontSize: '11px', margin: '10px 0 6px', fontWeight: 600 }}>SHOES / EU</p>
-                <div style={s.presetRow}>
+                <div style={s.presetRow} className="sd-preset-row">
                   {PRESET_SIZES_SHOE.map(sz => (
                     <button
                       key={sz} type="button"
@@ -876,7 +876,7 @@ const SellerDashboard = () => {
                 <p style={{ color: '#777', margin: 0 }}>Click "Add Product" to list your first item.</p>
               </div>
             ) : (
-              <div style={s.productGrid}>
+              <div style={s.productGrid} className="sd-product-grid">
                 {products.map(p => {
                   const discNum = parseFloat(p.discount) || 0
                   const fp = discNum > 0
@@ -965,12 +965,12 @@ const SellerDashboard = () => {
                   return (
                     <div key={order.id} style={s.orderCard}>
                       {/* Order header */}
-                      <div style={s.orderHead} onClick={() => setExpanded(isOpen ? null : order.id)}>
-                        <div style={s.orderLeft}>
+                      <div style={s.orderHead} className="od-header" onClick={() => setExpanded(isOpen ? null : order.id)}>
+                        <div style={s.orderLeft} className="od-header-left">
                           <div style={s.orderId}>#{order.id.slice(-8).toUpperCase()}</div>
                           <div style={s.orderDate}>{formatDate(order.createdAt)}</div>
                         </div>
-                        <div style={s.orderMid}>
+                        <div style={s.orderMid} className="od-header-mid">
                           <div style={s.buyerName}>{order.userName || 'Customer'}</div>
                           <div style={s.buyerEmail}>{order.userEmail}</div>
                         </div>
@@ -1061,7 +1061,7 @@ const SellerDashboard = () => {
             ) : (
               <>
                 {/* KPI cards */}
-                <div style={s.statsGrid}>
+                <div style={s.statsGrid} className="sd-stats-grid">
                   {[
                     { label: 'Total Revenue',   value: `$${Number(analyticsData.totalRevenue).toFixed(2)}`,  icon: FiDollarSign, color: '#10b981' },
                     { label: 'Total Orders',    value: analyticsData.totalOrders,   icon: FiShoppingBag, color: '#2196F3' },

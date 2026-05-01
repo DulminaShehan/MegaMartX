@@ -213,12 +213,12 @@ const OrderDetails = () => {
         {/* ── 5-step Progress Tracker (hidden for cancelled) ── */}
         {!isCancelled && (
           <div style={s.progressCard}>
-            <div style={s.progressSteps}>
+            <div style={s.progressSteps} className="od-progress-steps">
               {TRACKING_STEPS.map((step, i) => {
                 const done    = i <= stepIndex
                 const current = i === stepIndex
                 return (
-                  <div key={step.key} style={s.stepWrap}>
+                  <div key={step.key} style={s.stepWrap} className="od-step-wrap">
                     {i > 0 && (
                       <div style={{
                         ...s.connector,
@@ -283,7 +283,7 @@ const OrderDetails = () => {
           </div>
         )}
 
-        <div style={s.grid}>
+        <div style={s.grid} className="od-grid">
 
           {/* ── Left column ── */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>

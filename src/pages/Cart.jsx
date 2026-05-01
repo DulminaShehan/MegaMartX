@@ -45,7 +45,7 @@ const Cart = () => {
           <span style={s.badge}>{cartItems.length} item{cartItems.length !== 1 ? 's' : ''}</span>
         </div>
 
-        <div style={s.layout}>
+        <div style={s.layout} className="cart-layout">
           {/* Items list */}
           <div>
             <div style={s.listHead}>
