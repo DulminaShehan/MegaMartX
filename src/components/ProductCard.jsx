@@ -2,17 +2,24 @@
 // ProductCard — white card with light blue accents
 // ============================================================
 
-import { Link } from 'react-router-dom'
-import { FiShoppingCart, FiStar, FiHeart } from 'react-icons/fi'
+import { Link, useNavigate } from 'react-router-dom'
+import { FiShoppingCart, FiStar, FiHeart, FiZap } from 'react-icons/fi'
 import { useCart } from '../context/CartContext'
 import { formatPrice, truncate, imgFallback } from '../utils/helpers'
 
 const ProductCard = ({ product }) => {
   const { addToCart } = useCart()
+  const navigate = useNavigate()
 
   const handleAdd = (e) => {
     e.preventDefault()
     addToCart(product)
+  }
+
+  const handleBuyNow = (e) => {
+    e.preventDefault()
+    addToCart(product)
+    navigate('/checkout')
   }
 
   const discount = product.originalPrice && product.originalPrice > product.price
@@ -60,10 +67,16 @@ const ProductCard = ({ product }) => {
         </div>
 
         {/* CTA */}
-        <button style={s.cartBtn} onClick={handleAdd}>
-          <FiShoppingCart size={14} />
-          Add to Cart
-        </button>
+        <div style={s.ctaRow}>
+          <button style={s.cartBtn} onClick={handleAdd}>
+            <FiShoppingCart size={13} />
+            Add to Cart
+          </button>
+          <button style={s.buyBtn} onClick={handleBuyNow}>
+            <FiZap size={13} />
+            Buy Now
+          </button>
+        </div>
       </div>
     </Link>
   )
@@ -132,16 +145,30 @@ const s = {
   priceRow: { display: 'flex', alignItems: 'center', gap: '8px' },
   price: { color: '#2196F3', fontSize: '17px', fontWeight: 800 },
   original: { color: '#bbb', fontSize: '12px', textDecoration: 'line-through' },
+  ctaRow: {
+    display: 'flex', gap: '7px', marginTop: '2px',
+  },
   cartBtn: {
-    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '7px',
-    padding: '9px',
+    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '5px',
+    padding: '9px 0',
     background: '#2196F3',
     color: '#fff',
     border: 'none', borderRadius: '8px',
-    fontSize: '13px', fontWeight: 600,
+    fontSize: '12px', fontWeight: 600,
     cursor: 'pointer',
-    transition: 'background .2s, transform .15s',
-    marginTop: '2px',
+    flex: 1,
+    transition: 'background .2s',
+  },
+  buyBtn: {
+    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '5px',
+    padding: '9px 0',
+    background: '#ff6f00',
+    color: '#fff',
+    border: 'none', borderRadius: '8px',
+    fontSize: '12px', fontWeight: 600,
+    cursor: 'pointer',
+    flex: 1,
+    transition: 'background .2s',
   },
 }
 

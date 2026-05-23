@@ -4,7 +4,7 @@
 
 import { useState, useEffect } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
-import { FiShoppingCart, FiArrowLeft, FiStar, FiTruck, FiRefreshCw, FiShield, FiMinus, FiPlus, FiUser, FiMessageSquare, FiShoppingBag, FiHeart, FiZoomIn } from 'react-icons/fi'
+import { FiShoppingCart, FiArrowLeft, FiStar, FiTruck, FiRefreshCw, FiShield, FiMinus, FiPlus, FiUser, FiMessageSquare, FiShoppingBag, FiHeart, FiZoomIn, FiZap } from 'react-icons/fi'
 import {
   getProductById, getProductReviews,
   trackProductView, getSimilarProducts, startConversation,
@@ -153,26 +153,39 @@ const ProductDetails = () => {
     finally { setMsgBusy(false) }
   }
 
+  const validateVariants = () => {
+    const variants = product?.variants || []
+    if (variants.length === 0) return true
+    if (!selectedColor && [...new Set(variants.map(v => v.color).filter(Boolean))].length > 0) {
+      toast.error('Please select a color'); return false
+    }
+    if (!selectedSize && [...new Set(variants.map(v => v.size).filter(Boolean))].length > 0) {
+      toast.error('Please select a size'); return false
+    }
+    const variantRow = variants.find(v => v.color === selectedColor && v.size === selectedSize)
+    if (variantRow && variantRow.stock === 0) {
+      toast.error('This combination is out of stock'); return false
+    }
+    return true
+  }
+
   const handleAddToCart = () => {
     if (!currentUser) {
       toast.error('Please sign in to add items to your cart')
       return navigate('/login', { state: { from: { pathname: `/product/${id}` } } })
     }
-    const variants = product?.variants || []
-    const hasVariants = variants.length > 0
-    if (hasVariants) {
-      if (!selectedColor && [...new Set(variants.map(v => v.color).filter(Boolean))].length > 0) {
-        toast.error('Please select a color'); return
-      }
-      if (!selectedSize && [...new Set(variants.map(v => v.size).filter(Boolean))].length > 0) {
-        toast.error('Please select a size'); return
-      }
-      const variantRow = variants.find(v => v.color === selectedColor && v.size === selectedSize)
-      if (variantRow && variantRow.stock === 0) {
-        toast.error('This combination is out of stock'); return
-      }
-    }
+    if (!validateVariants()) return
     addToCart(product, qty, selectedColor, selectedSize)
+  }
+
+  const handleBuyNow = () => {
+    if (!currentUser) {
+      toast.error('Please sign in to buy')
+      return navigate('/login', { state: { from: { pathname: `/product/${id}` } } })
+    }
+    if (!validateVariants()) return
+    addToCart(product, qty, selectedColor, selectedSize)
+    navigate('/checkout')
   }
 
   if (loading) return <FullPageLoader />
@@ -378,7 +391,7 @@ const ProductDetails = () => {
               </div>
             )}
 
-            {/* ── Qty + Cart ── */}
+            {/* ── Qty + Cart + Buy Now ── */}
             <div style={s.addRow} className="pd-add-row">
               <div style={s.qtyControl}>
                 <button style={s.qtyBtn} onClick={() => setQty(q => Math.max(1, q - 1))}><FiMinus size={14} /></button>
@@ -395,6 +408,17 @@ const ProductDetails = () => {
                 disabled={displayStock === 0}
               >
                 <FiShoppingCart size={17} /> Add to Cart
+              </button>
+              <button
+                style={{
+                  ...s.buyNowBtn,
+                  opacity: displayStock === 0 ? 0.5 : 1,
+                  cursor:  displayStock === 0 ? 'not-allowed' : 'pointer',
+                }}
+                onClick={handleBuyNow}
+                disabled={displayStock === 0}
+              >
+                <FiZap size={17} /> Buy Now
               </button>
             </div>
 
@@ -644,6 +668,13 @@ const s = {
     border: 'none', borderRadius: '10px',
     fontSize: '15px', fontWeight: 700,
     flex: 1, boxShadow: '0 4px 16px rgba(33,150,243,0.3)',
+  },
+  buyNowBtn: {
+    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
+    padding: '12px 28px', background: '#ff6f00', color: '#fff',
+    border: 'none', borderRadius: '10px',
+    fontSize: '15px', fontWeight: 700,
+    flex: 1, boxShadow: '0 4px 16px rgba(255,111,0,0.3)',
   },
 
   trustRow: {
